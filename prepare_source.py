@@ -49,9 +49,9 @@ def prepare(destination, existing=False):
     replace_once(main, '  mainWindow = new BrowserWindow(windowOptions);',
                  '  mainWindow = new BrowserWindow(windowOptions);\n  installChatBridge(mainWindow, rootDir);')
     replace_once(main, '      ...defaultWebPrefs,\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,',
-                 "      ...defaultWebPrefs,\n      additionalArguments: ['--chatbridge-signal-content'],\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,")
+                 "      ...defaultWebPrefs,\n      additionalArguments: ['--chatbridge-signal-content'],\n      backgroundThrottling: false,\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,")
     replace_once(main, 'const gotLock = app.requestSingleInstanceLock();',
-                 'app.disableHardwareAcceleration();\nconst gotLock = app.requestSingleInstanceLock();')
+                 "app.disableHardwareAcceleration();\nif (process.platform === 'win32') {\n  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');\n  app.commandLine.appendSwitch('disable-renderer-backgrounding');\n  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,' + app.commandLine.getSwitchValue('disable-features'));\n}\nconst gotLock = app.requestSingleInstanceLock();")
     # Preserve Signal URL handling, but never install official Signal over this fork.
     replace_once(main, '  // Second, start checking for app updates\n',
                  '  // ChatBridge: own updater is not configured; do not replace this fork with official Signal.\n  if (app.getName() === \'ChatBridge\') return;\n\n  // Second, start checking for app updates\n')

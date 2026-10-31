@@ -83,8 +83,15 @@ jobs:
           if-no-files-found: error
       - name: Verify packaged Signal login renders
         if: github.ref == 'refs/heads/fixed-workspace'
-        timeout-minutes: 3
-        run: node tests/packaged-startup.cjs
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $env:CHATBRIDGE_STARTUP_LABEL = 'first-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'First startup verification failed' }
+          $env:CHATBRIDGE_STARTUP_LABEL = 'second-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Second startup verification failed' }
       - name: Save startup diagnostics
         if: always() && github.ref == 'refs/heads/fixed-workspace'
         uses: actions/upload-artifact@v4

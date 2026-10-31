@@ -5,7 +5,7 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});let id=0;const events=[];const waiting=new Map();ws.addEventListener('message',e=>{const p=JSON.parse(String(e.data));if(p.method&&/exceptionThrown|entryAdded/.test(p.method))events.push(p);const cb=waiting.get(p.id);if(cb){waiting.delete(p.id);p.error?cb.reject(Error(p.error.message)):cb.resolve(p.result);}});return {events,call(method,params={}){return new Promise((resolve,reject)=>{const n=++id;const timer=setTimeout(()=>{waiting.delete(n);reject(Error('CDP request timeout: '+method));},10000);waiting.set(n,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});},close:()=>ws.close()};}
 (async()=>{
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
- const output=path.resolve('startup-diagnostics');fs.mkdirSync(output,{recursive:true});
+ const output=path.resolve('startup-diagnostics',process.env.CHATBRIDGE_STARTUP_LABEL||'run');fs.mkdirSync(output,{recursive:true});
  const env={...process.env};delete env.CHATBRIDGE_HOST_PIPE;delete env.CHATBRIDGE_HOST_TOKEN;delete env.CHATBRIDGE_SIGNAL_PROFILE;
  const app=spawn(path.resolve('signal-source/release/win-unpacked/ChatBridge.exe'),['--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port],{env,stdio:['ignore','pipe','pipe']});
  const outputLog=fs.createWriteStream(path.join(output,'process.log'));app.stdout.pipe(outputLog,{end:false});app.stderr.pipe(outputLog,{end:false});
