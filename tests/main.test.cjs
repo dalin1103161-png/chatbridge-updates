@@ -30,7 +30,7 @@ function fixture() {
     setVisible(value) { this.visible = value; }
     setBounds(value) { this.bounds = value; }
   }
-  const electron = { spawn: (exe,args,options)=>{launches.push({exe,args,options});return {on:()=>{},unref:()=>{}};}, app: { getPath: () => temp },
+  const electron = { localTranslator:{translate:async(text,target)=>target+':'+text,close:()=>{}}, spawn: (exe,args,options)=>{launches.push({exe,args,options});return {on:()=>{},unref:()=>{}};}, app: { getPath: () => temp },
     ipcMain: { handle: (_, value) => handler = value, removeHandler: () => {} }, WebContentsView: View };
   const instance = installChatBridge(win, '/source', electron);
   return { temp, win, actions, launches, instance, invoke: (method, value, id = 1) => handler({ sender: { id } }, method, value),
@@ -61,18 +61,11 @@ test('isolates two WhatsApp sessions and switches within the application', async
     assert(!JSON.stringify(config).includes('Subscription-Key'));
   } finally { f.close(); }
 });
-test('translation needs configured service; settings never persist the key', async () => {
-  const f = fixture(); try {
-    await assert.rejects(f.invoke('translate', {text:'Hello',target:'en'}), /配置/);
-    await f.invoke('settings', {key:'private-test-key',region:'eastus'});
-    for (const name of fs.readdirSync(f.temp)) { const file=path.join(f.temp,name);if(fs.statSync(file).isFile()) assert(!fs.readFileSync(file,'utf8').includes('private-test-key')); }
-  } finally { f.close(); }
-});
+test('translation works without credentials or cloud setup',async()=>{const f=fixture();try{assert.equal(await f.invoke('translate',{text:'Hello',target:'zh-Hans'}),'zh-Hans:Hello');}finally{f.close();}});
 test('WhatsApp page cannot change native account workspaces or settings', async () => {
   const f = fixture(); try {
     const a = await f.invoke('add-whatsapp', 'Work');
     const id = f.instance.views.get(a.id).webContents.id;
-    await assert.rejects(f.invoke('settings', {key:'secret',region:''}, id), /Signal/);
     await assert.rejects(f.invoke('add-whatsapp', 'Unexpected', id), /顶部/);
   } finally { f.close(); }
 });

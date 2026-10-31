@@ -166,13 +166,12 @@ function installPreload(options = {}) {
         const theme=select('theme',[['cyan','极夜 · 青 / Midnight Cyan'],['violet','星云 · 紫 / Nebula Violet'],['light','冰川 · 白 / Glacier Light']]);
         const size=select('size',[['compact','紧凑 / Compact'],['normal','标准 / Standard'],['large','大字 / Large']]);
         const preview=()=>{prefs={language:language.value,theme:theme.value,size:size.value};applyPrefs();};language.onchange=theme.onchange=size.onchange=preview;
-        make('b',words[prefs.language].service+' · Azure',form);
-        const key=make('input',null,form);key.type='password';key.placeholder='Azure Translator Key（仅本次内存）';
-        const region=make('input',null,form);region.placeholder='Region / 区域，例如 eastus';
+        make('b','本地离线翻译 / Offline translation',form);
+        make('small','中英文互译 · 无需密钥 · 无按量收费。模型随安装包提供，首次翻译可能需要几秒加载。',form);
         make('small','公开更新渠道：无需 GitHub 账号或令牌。只检查与下载 ChatBridge 安装包。',form);
         const report=make('span','',form);const save=make('button',words[prefs.language].save,form);
-        save.onclick=async()=>{preview();if(key.value.trim()&&!await invoke('settings',{key:key.value,region:region.value},report))return;if(!await invoke('window-settings',{title:windowName.value,notifications:notification.checked,sound:sound.checked},report))return;const result=await invoke('preferences',prefs,report);if(result){key.value='';overlay.remove();}};
-        make('button',words[prefs.language].close,form).onclick=()=>{key.value='';overlay.remove();};
+        save.onclick=async()=>{preview();if(!await invoke('window-settings',{title:windowName.value,notifications:notification.checked,sound:sound.checked},report))return;const result=await invoke('preferences',prefs,report);if(result){overlay.remove();}};
+        make('button',words[prefs.language].close,form).onclick=()=>{overlay.remove();};
       };
       load().catch(()=>{});
     }

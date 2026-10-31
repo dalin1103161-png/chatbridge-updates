@@ -5,6 +5,8 @@ on:
     branches: [main, fixed-workspace]
     paths:
       - extension/**
+      - local_translate/**
+      - tests/**
       - prepare_source.py
       - package.json
       - package-lock.json
@@ -29,6 +31,21 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Test the extension
         run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Build and verify bundled offline translator
+        shell: pwsh
+        run: |
+          python -m pip install -r local_translate/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Offline dependencies failed' }
+          python local_translate/prepare_models.py --dest local-models --cache model-downloads
+          if ($LASTEXITCODE -ne 0) { throw 'Offline model verification failed' }
+          python -m PyInstaller --noconfirm --clean --onedir --console --name ChatBridgeTranslator --distpath local-runtime --workpath translator-build --specpath translator-build --collect-all ctranslate2 --collect-all sentencepiece --collect-all numpy local_translate/engine.py
+          if ($LASTEXITCODE -ne 0) { throw 'Offline runtime packaging failed' }
+          local-runtime/ChatBridgeTranslator/ChatBridgeTranslator.exe --models local-models --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled offline translation failed' }
       - uses: pnpm/action-setup@v4
         with:
           version: 11.24.0
@@ -56,6 +73,8 @@ jobs:
       - name: Package unsigned Windows application
         working-directory: signal-source
         run: pnpm run build:release --win nsis --x64 --publish=never
+      - name: Verify installed offline resources
+        run: node tests/local-translator-smoke.cjs
       - name: Save installer before startup verification
         uses: actions/upload-artifact@v4
         with:
@@ -98,6 +117,7 @@ jobs:
             signal-source/LICENSE
             prepare_source.py
             extension/
+            local_translate/
 
       - uses: actions/upload-artifact@v4
         with:

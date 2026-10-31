@@ -53,7 +53,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const views = new Map();
   const allowed = new Set([window.webContents.id]);
   if(native)allowed.add(native.defaultWebContents.id);
-  let key = '', region = '', activeId = null;
+  let activeId = null;
+  const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
   const filename = path.join(app.getPath('userData'), 'chatbridge-whatsapp.json');
   if (fs.existsSync(filename)) {
@@ -119,26 +120,9 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   };
   const handleRequest = async (event, method, value) => {
     authorized(event);
-    if (method === 'settings') {
-      if (event.sender.id !== window.webContents.id) throw new Error('请在 Signal 页配置翻译服务。');
-      if (!value || typeof value.key !== 'string' || typeof value.region !== 'string') throw new Error('设置无效。');
-      key = value.key.trim(); region = value.region.trim();
-      return { configured: Boolean(key) };
-    }
     if (method === 'translate') {
       validTranslation(value);
-      if (!key) throw new Error('请先在 Signal 页顶部“翻译设置”配置服务。');
-      const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': key };
-      if (region) headers['Ocp-Apim-Subscription-Region'] = region;
-      const response = await fetch('https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=' + value.target, {
-        method: 'POST', headers, body: JSON.stringify([{ Text: value.text }]), signal: AbortSignal.timeout(25000),
-        redirect: 'error',
-      });
-      if (!response.ok) throw new Error('翻译服务 HTTP ' + response.status + '，请检查密钥、区域及额度。');
-      const payload = await response.json();
-      const text = payload?.[0]?.translations?.[0]?.text;
-      if (typeof text !== 'string') throw new Error('翻译响应异常。');
-      return text;
+      return translator.translate(value.text, value.target);
     }
     if (method === 'copy') {
       if (typeof value !== 'string' || value.length > 10000) throw new Error('复制内容无效。');
@@ -228,7 +212,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(updateTimer)clearInterval(updateTimer);
     ipcMain.removeHandler('chatbridge:invoke');
     for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
-    allowed.clear(); views.clear(); key = ''; region = '';
+    allowed.clear(); views.clear(); translator.close();
   });
   return { show, views };
 }
