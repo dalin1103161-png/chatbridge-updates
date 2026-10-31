@@ -69,6 +69,7 @@ def prepare(destination, existing=False):
     package['author'] = {'name': 'ChatBridge custom build'}
     package['build']['appId'] = 'local.chatbridge.signal-desktop'
     package['build']['files'].append('chatbridge/**')
+    package['build']['asarUnpack'] = list(package['build'].get('asarUnpack', [])) + ['chatbridge/native-window.ps1']
     package['build']['win'].pop('signtoolOptions', None)
     package['build']['win']['publish'] = None
     package['build']['win']['artifactName'] = 'ChatBridge-Setup.${ext}'

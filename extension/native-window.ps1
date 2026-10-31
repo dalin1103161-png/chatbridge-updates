@@ -15,7 +15,7 @@ public static class ChatBridgeWindows {
   var c = new IntPtr(child); uint pid; GetWindowThreadProcessId(c, out pid);
   if(pid != expectedPid || pid == 0) throw new Exception("Window process mismatch");
   if(attach) {
-   var style=GetWindowLong(c,-16);style=(style & ~unchecked((int)0x80CF0000)) | 0x40000000;
+   var style=GetWindowLong(c,-16);style=parent==0 ? ((style & ~0x40000000) | unchecked((int)0x80000000)) : ((style & ~unchecked((int)0x80CF0000)) | 0x40000000);
    SetWindowLong(c,-16,style);
    SetParent(c,new IntPtr(parent));
    if(GetParent(c)!=new IntPtr(parent)) throw new Exception("Embedding parent mismatch");

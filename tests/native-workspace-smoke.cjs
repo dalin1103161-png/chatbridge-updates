@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Run with Electron on Windows. Uses blank local fixture windows, never real accounts.
-const {app,BrowserWindow}=require('electron');const fs=require('node:fs');const path=require('node:path');const os=require('node:os');const assert=require('node:assert/strict');
+const {app,BrowserWindow,ipcMain}=require('electron');const fs=require('node:fs');const path=require('node:path');const os=require('node:os');const assert=require('node:assert/strict');
 const fixture=Boolean(process.env.CHATBRIDGE_SMOKE_CHILD);
 app.whenReady().then(async()=>{
  if(process.env.CHATBRIDGE_HOST_PIPE){
@@ -11,6 +11,7 @@ app.whenReady().then(async()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cb-native-smoke-'));
  fs.cpSync(path.join(__dirname,'../extension'),path.join(directory,'chatbridge'),{recursive:true});
  fs.copyFileSync(__filename,path.join(directory,'fixture.cjs'));fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify({name:'cb-native-test',main:'fixture.cjs'}));
+ ipcMain.handle('chatbridge:invoke',(_event,method)=>method==='accounts'?[]:method==='signal-accounts'?{accounts:[],current:'default'}:undefined);
  const w=new BrowserWindow({show:false,width:1000,height:700});await w.loadURL('data:text/html,<body>Default Signal fixture</body>');
  process.env.CHATBRIDGE_SMOKE_CHILD='1';
  const controller=require(path.join(directory,'chatbridge/host.cjs')).createNativeWorkspace(w,directory,require('electron'));
@@ -25,6 +26,6 @@ app.whenReady().then(async()=>{
   controller.hide();assert.equal(controller.snapshot().active,null);
   controller.close(b);assert(!controller.snapshot().windows.some(r=>r.id===b));
   console.log('NATIVE_WORKSPACE_SMOKE_PASS: three isolated processes attached to one parent; switching reuses windows');
-  controller.host.close();setTimeout(()=>app.exit(0),300);
- }catch(e){console.error(e);controller.host.close();setTimeout(()=>app.exit(1),300);}
+  await controller.shutdown(false);console.log('NATIVE_WORKSPACE_SHUTDOWN_PASS');app.exit(0);
+ }catch(e){console.error(e);await controller.shutdown(false);app.exit(1);}
 }).catch(e=>{console.error(e);app.exit(1);});
