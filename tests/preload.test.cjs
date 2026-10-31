@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const { installPreload } = require('../extension/preload.cjs');
 
-function fixture(whatsapp=false,html) {
+function fixture(whatsapp=false,html,translation) {
   const dom = new JSDOM(html || '<!doctype html><body><div class="module-ConversationHeader__header__info__title">Friend</div><div data-message-id="old"><span class="module-message__text">Hello from history</span></div></body>', { url:'https://fixture.invalid' });
   const old = { document:global.document, interval:global.setInterval, installed:global.__chatbridgeInstalled };
   global.document = dom.window.document;
@@ -17,7 +17,7 @@ function fixture(whatsapp=false,html) {
     if (method === 'accounts') return [{id:'wa-one',name:'Work WA'},{id:'wa-two',name:'Personal WA'}];
     if (method === 'signal-accounts') return {accounts:[{id:'default',name:'Signal Work'}],current:'default'};
     if (method === 'add-whatsapp') return {id:'test-account',name:value};
-    if (method === 'translate') return '<b>译文作为纯文字</b>';
+    if (method === 'translate') return translation?translation(value):'<b>译文作为纯文字</b>';
     return true;
   } };
   const api = installPreload({ipc,whatsapp});
@@ -126,4 +126,15 @@ test('home entry and welcome cards open the correct account flow',async()=>{
   assert(f.calls.some(c=>c.method==='home'));
   d.querySelector('#cb-home-whatsapp').click();await new Promise(r=>setTimeout(r,0));assert(d.querySelector('[data-chatbridge-add-account]'));
  }finally{f.close();}
+});
+
+
+test('multiple history messages are submitted together before the first result completes',async()=>{
+ let release;const pending=new Promise(r=>release=r);
+ const f=fixture(false,'<!doctype html><body><div class="module-ConversationHeader__header__info__title">Friend</div>'+[1,2,3].map(i=>`<div data-message-id="${i}"><span class="module-message__text">Message ${i}</span></div>`).join('')+'</body>',()=>pending);
+ try{f.api.state.history=true;f.api.scan();await Promise.resolve();assert.equal(f.calls.filter(c=>c.method==='translate').length,3);release('译文');await f.api.state.serial;assert.equal(f.dom.window.document.querySelectorAll('[data-translated="1"]').length,3);}finally{release('译文');await f.api.state.serial;f.close();}
+});
+test('WhatsApp selectable text can itself carry the message metadata',async()=>{
+ const f=fixture(true,'<!doctype html><body><div id="app"><div id="main"><div data-id="false_friend_1"><div data-pre-plain-text="Friend" class="selectable-text">Current WhatsApp message</div></div></div></div></body>');
+ try{const d=f.dom.window.document;assert.equal(f.api.messageRows().rows[0].text,'Current WhatsApp message');d.querySelector('[data-chatbridge-message] button').click();await f.api.state.serial;assert.equal(f.api.messageRows().rows[0].text,'Current WhatsApp message');assert.equal(d.querySelector('[data-chatbridge-output]').textContent,'<b>译文作为纯文字</b>');}finally{f.close();}
 });

@@ -55,6 +55,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   if(native)allowed.add(native.defaultWebContents.id);
   let activeId = null;
   const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
+  const warmupTimer=setTimeout(()=>{if(translator.warmup)translator.warmup().catch(()=>{});},1500);warmupTimer.unref();
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
   const filename = path.join(app.getPath('userData'), 'chatbridge-whatsapp.json');
   if (fs.existsSync(filename)) {
@@ -214,7 +215,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(updateTimer)clearInterval(updateTimer);
     ipcMain.removeHandler('chatbridge:invoke');
     for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
-    allowed.clear(); views.clear(); translator.close();
+    clearTimeout(warmupTimer);allowed.clear(); views.clear(); translator.close();
   });
   return { show, views };
 }
