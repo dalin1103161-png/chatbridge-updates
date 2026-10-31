@@ -1,0 +1,109 @@
+name: Build ChatBridge Signal on Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - extension/**
+      - prepare_source.py
+      - package.json
+      - package-lock.json
+      - .github/workflows/windows-build.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      SIGNAL_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned upstream source
+        run: python prepare_source.py --dest signal-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: signal-source/.nvmrc
+      - name: Install extension test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test the extension
+        run: npm test
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+          run_install: false
+      - name: Install upstream dependencies
+        working-directory: signal-source
+        shell: pwsh
+        run: |
+          New-Item -ItemType File -Path noop.js -Force | Out-Null
+          $env:NPM_CONFIG_NODE_GYP = Join-Path $PWD 'noop.js'
+          try {
+            pnpm install --frozen-lockfile
+            if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          } finally { Remove-Item noop.js -ErrorAction SilentlyContinue }
+      - name: Generate upstream assets and bundles
+        working-directory: signal-source
+        run: pnpm run generate
+      - name: Check TypeScript
+        working-directory: signal-source
+        run: pnpm run check:types
+      - name: Package unsigned Windows application
+        working-directory: signal-source
+        run: pnpm run build:release --win nsis --x64 --publish=never
+      - name: Require executable output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'signal-source/release/win-unpacked/ChatBridge.exe')) {
+            throw 'Expected Windows executable is missing'
+          }
+      - name: Save modified-source patch
+        shell: pwsh
+        run: |
+          git -C signal-source add -N chatbridge
+          git -C signal-source diff --binary --output=../chatbridge-source.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-Windows-unverified
+          path: signal-source/release/win-unpacked/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-corresponding-source
+          path: |
+            chatbridge-source.patch
+            signal-source/chatbridge/source-manifest.json
+            signal-source/LICENSE
+            prepare_source.py
+            extension/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-Windows-Installer
+          path: signal-source/release/ChatBridge-Setup.exe
+          if-no-files-found: error
+      - name: Publish public update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "chatbridge-build-$env:GITHUB_RUN_ID"
+          gh release create $tag --draft --target $env:GITHUB_SHA --title "ChatBridge build $env:GITHUB_RUN_ID" --notes "ChatBridge Windows build. Signal core v8.33.0. Source and validation: this repository and attached patch. Real phone linking and synchronization require user validation."
+          if ($LASTEXITCODE -ne 0) { throw 'Release preparation failed' }
+          gh release upload $tag signal-source/release/ChatBridge-Setup.exe chatbridge-source.patch signal-source/chatbridge/source-manifest.json LICENSE
+          if ($LASTEXITCODE -ne 0) { throw 'Release file upload failed' }
+          # Draft releases may not resolve through the tag endpoint until published.
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Release listing failed' }
+          $release = $releases | Where-Object tag_name -eq $tag | Select-Object -First 1
+          if (-not $release) { throw 'Draft release is missing' }
+          $asset = $release.assets | Where-Object name -eq 'ChatBridge-Setup.exe'
+          if (-not $asset) { throw 'Installer asset is missing' }
+          $hash = (Get-FileHash signal-source/release/ChatBridge-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{build=[long]$env:GITHUB_RUN_ID;assetId=[long]$asset.id;size=[long]$asset.size;sha256=$hash} | ConvertTo-Json | Set-Content chatbridge-update.json -Encoding utf8NoBOM
+          gh release upload $tag chatbridge-update.json
+          if ($LASTEXITCODE -ne 0) { throw 'Update manifest upload failed' }
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { EventEmitter } = require('node:events');
+const { installChatBridge, validTranslation } = require('../extension/main.cjs');
+
+function fixture() {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'chatbridge-'));
+  const win = new EventEmitter();
+  const actions = [];
+  win.webContents = { id: 1, send: (...args) => actions.push(args) };
+  win.getContentSize = () => [1100, 800];
+  win.contentView = { addChildView: () => {} };
+  let handler, counter = 100;
+  const launches=[];
+  class View {
+    constructor(options) {
+      this.options = options;
+      this.webContents = new EventEmitter();
+      Object.assign(this.webContents, {
+        id: counter++, getUserAgent: () => 'Mozilla/5.0 Chrome/140.0 Electron/39.0 ChatBridge/8.33.0',
+        setUserAgent: ua => this.ua = ua, setWindowOpenHandler: () => {}, loadURL: url => this.url = url,
+        isDestroyed: () => false, close: () => {}, send: () => {},
+      });
+    }
+    setVisible(value) { this.visible = value; }
+    setBounds(value) { this.bounds = value; }
+  }
+  const electron = { spawn: (exe,args,options)=>{launches.push({exe,args,options});return {on:()=>{},unref:()=>{}};}, app: { getPath: () => temp },
+    ipcMain: { handle: (_, value) => handler = value, removeHandler: () => {} }, WebContentsView: View };
+  const instance = installChatBridge(win, '/source', electron);
+  return { temp, win, actions, launches, instance, invoke: (method, value, id = 1) => handler({ sender: { id } }, method, value),
+    close() { win.emit('closed'); fs.rmSync(temp, { recursive: true, force: true }); } };
+}
+
+test('rejects empty, oversized and invalid translation requests', () => {
+  for (const value of [{text:'',target:'en'}, {text:'x'.repeat(10001),target:'en'}, {text:'hi',target:'unsupported'}]) assert.throws(() => validTranslation(value));
+});
+test('denies unknown renderers before any action', async () => {
+  const f = fixture(); try { await assert.rejects(f.invoke('accounts', null, 999), /权限/); } finally { f.close(); }
+});
+test('isolates two WhatsApp sessions and switches within the application', async () => {
+  const f = fixture();
+  try {
+    const a = await f.invoke('add-whatsapp', 'Work');
+    const b = await f.invoke('add-whatsapp', 'Personal');
+    const va = f.instance.views.get(a.id), vb = f.instance.views.get(b.id);
+    assert.notEqual(va.options.webPreferences.partition, vb.options.webPreferences.partition);
+    assert.equal(va.visible, false); assert.equal(vb.visible, true);
+    assert.equal(vb.url, 'https://web.whatsapp.com/');
+    assert.equal(vb.bounds.y, 108);
+    assert.equal(vb.bounds.x,200);
+    assert(!vb.ua.includes('Electron/'));
+    await f.invoke('signal'); assert.equal(vb.visible, false);
+    const config = JSON.parse(fs.readFileSync(path.join(f.temp, 'chatbridge-whatsapp.json')));
+    assert.equal(config.accounts.length, 2);
+    assert(!JSON.stringify(config).includes('Subscription-Key'));
+  } finally { f.close(); }
+});
+test('translation needs configured service; settings never persist the key', async () => {
+  const f = fixture(); try {
+    await assert.rejects(f.invoke('translate', {text:'Hello',target:'en'}), /配置/);
+    await f.invoke('settings', {key:'private-test-key',region:'eastus'});
+    for (const name of fs.readdirSync(f.temp)) { const file=path.join(f.temp,name);if(fs.statSync(file).isFile()) assert(!fs.readFileSync(file,'utf8').includes('private-test-key')); }
+  } finally { f.close(); }
+});
+test('WhatsApp page cannot change native account workspaces or settings', async () => {
+  const f = fixture(); try {
+    const a = await f.invoke('add-whatsapp', 'Work');
+    const id = f.instance.views.get(a.id).webContents.id;
+    await assert.rejects(f.invoke('settings', {key:'secret',region:''}, id), /Signal/);
+    await assert.rejects(f.invoke('add-whatsapp', 'Unexpected', id), /顶部/);
+  } finally { f.close(); }
+});
+
+test('appearance preferences persist and reject writes from WhatsApp',async()=>{
+ const f=fixture();try{
+   const p={language:'en',theme:'violet',size:'large'};
+   await f.invoke('preferences',p);
+   assert.deepEqual(await f.invoke('preferences'),p);
+   const a=await f.invoke('add-whatsapp','Work');
+   await assert.rejects(f.invoke('preferences',p,f.instance.views.get(a.id).webContents.id),/设置/);
+   await assert.rejects(f.invoke('preferences',{...p,size:'invalid'}),/无效/);
+   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).preferences,p);
+ }finally{f.close();}
+});
+
+test('Signal accounts use separate persisted identities and launch selected profile only',async()=>{
+ const f=fixture();try{
+  const a=await f.invoke('add-signal','Work Signal');
+  const b=await f.invoke('add-signal','Personal Signal');
+  assert.notEqual(a.id,b.id);
+  assert.equal(f.launches[0].options.env.CHATBRIDGE_SIGNAL_PROFILE,a.id);
+  assert.equal(f.launches[1].options.env.CHATBRIDGE_SIGNAL_PROFILE,b.id);
+  assert.equal(f.launches[0].options.env.ELECTRON_RUN_AS_NODE,undefined);
+  const list=await f.invoke('signal-accounts');assert.equal(list.accounts.length,3);
+  assert.equal(list.current,'default');
+  await f.invoke('open-signal',a.id);assert.equal(f.launches.length,3);
+  await f.invoke('open-signal','default');assert.equal(f.launches.length,3);
+  await assert.rejects(f.invoke('open-signal','../outside'),/未知/);
+  const wa=await f.invoke('add-whatsapp','WA');
+  await assert.rejects(f.invoke('add-signal','Denied',f.instance.views.get(wa.id).webContents.id),/顶部/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'ChatBridgeSignalAccounts',a.id+'.json'))).name,'Work Signal');
+ }finally{f.close();}
+});
+
+test('account names and window title are editable without replacing login identities',async()=>{
+ const f=fixture();try{
+  const a=await f.invoke('add-whatsapp','Before');
+  await f.invoke('rename-account',{platform:'whatsapp',id:a.id,name:'After'});
+  assert.equal((await f.invoke('accounts'))[0].id,a.id);
+  assert.equal((await f.invoke('accounts'))[0].name,'After');
+  await f.invoke('rename-account',{platform:'signal',id:'default',name:'My Signal'});
+  assert.equal((await f.invoke('signal-accounts')).accounts[0].name,'My Signal');
+  await f.invoke('window-settings',{title:'Work Station',notifications:false,sound:false});
+  assert.equal((await f.invoke('window-settings')).title,'Work Station');
+  await assert.rejects(f.invoke('rename-account',{platform:'signal',id:'../outside',name:'No'}),/未知/);
+ }finally{f.close();}
+});
+
+test('removing accounts persists the list change, closes WhatsApp view and rejects traversal',async()=>{
+ const f=fixture();try{
+  const wa=await f.invoke('add-whatsapp','Remove me');
+  const sessionFile=path.join(f.temp,'keep-session-marker');fs.writeFileSync(sessionFile,'retained');
+  await f.invoke('remove-account',{platform:'whatsapp',id:wa.id});
+  assert.equal((await f.invoke('accounts')).length,0);assert.equal(f.instance.views.size,0);
+  assert.equal(fs.readFileSync(sessionFile,'utf8'),'retained');
+  const signal=await f.invoke('add-signal','Remove signal');
+  await f.invoke('remove-account',{platform:'signal',id:signal.id});
+  assert(!(await f.invoke('signal-accounts')).accounts.some(a=>a.id===signal.id));
+  await f.invoke('remove-account',{platform:'signal',id:'default'});
+  assert.equal((await f.invoke('signal-accounts')).accounts.length,0);
+  await assert.rejects(f.invoke('remove-account',{platform:'signal',id:'../outside'}),/未知/);
+ }finally{f.close();}
+});
