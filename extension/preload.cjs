@@ -16,7 +16,7 @@ function installPreload(options = {}) {
   };
   const invoke = async (method, value, report) => {
     try { return await call(method, value); }
-    catch (error) { report.textContent = error.message || '操作失败'; return undefined; }
+    catch (error) { report.textContent = (error.message || '操作失败').replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, ''); return undefined; }
   };
   const state = { history: false, incoming: false, chat: '', seen: new Set(), baseline: false, serial: Promise.resolve(), automatic: 0 };
   let history, incoming, target, status;
@@ -206,7 +206,7 @@ function installPreload(options = {}) {
       for (const node of root.querySelectorAll('[data-pre-plain-text]')) {
         const bubble = node.closest('[data-id]'); const id = bubble?.getAttribute('data-id');
         const text = [...node.querySelectorAll('span.selectable-text')].map(n => n.innerText || n.textContent).join('\n');
-        if (id && text && !seen.has(id)) { seen.add(id); rows.push({ id, text, node: bubble }); }
+        if (id && text && !seen.has(id)) { seen.add(id); rows.push({ id, text, node }); }
       }
       const match = rows[0]?.id.match(/^(?:true|false)_([^_]+)_/);
       return { chat: match ? match[1] : root.querySelector('header span[title]')?.getAttribute('title') || '', rows };
@@ -216,7 +216,7 @@ function installPreload(options = {}) {
       const textNode = node.querySelector('.module-message__text');
       const text = textNode?.innerText || textNode?.textContent;
       const id = node.getAttribute('data-message-id');
-      if (id && text) rows.push({ id, text, node });
+      if (id && text) rows.push({ id, text, node: textNode.parentElement, anchor: textNode });
     }
     const title = document.querySelector('.module-ConversationHeader__header__info__title');
     return { chat: title?.textContent?.trim() || '', rows };
@@ -237,7 +237,7 @@ function installPreload(options = {}) {
       output.textContent = '翻译中';
       const result = await invoke('translate', { text: original, target: language }, output);
       if (result !== undefined && state.chat === chat && box.isConnected && box.dataset.source === original) {
-        output.textContent = '译文：' + result; box.dataset.translated = '1';
+        output.textContent = result; box.dataset.translated = '1'; button.hidden = true;
       }
     }).finally(() => { box.dataset.busy = '0'; button.disabled = false; });
   }
@@ -246,19 +246,21 @@ function installPreload(options = {}) {
     const { chat, rows } = messageRows();
     if (!chat) return;
     const changed = state.chat !== chat;
-    if (changed) { state.chat = chat; state.seen.clear(); state.baseline = false; state.history = false; history.checked = false; state.automatic = 0; }
+    if (changed) { state.chat = chat; state.seen.clear(); state.baseline = false; state.automatic = 0; }
     const known = rows.map((r, i) => state.seen.has(r.id) ? i : -1).filter(i => i >= 0);
     const lastKnown = known.length ? Math.max(...known) : Infinity;
     for (const [index, row] of rows.entries()) {
       let box = row.node.querySelector(':scope > [data-chatbridge-message]');
       if (!box) {
         box = make('div', null, row.node); box.dataset.chatbridgeMessage = '1';
-        box.style.cssText = 'margin:6px 0;padding:5px 8px;border-top:1px solid #79a99a70;font:13px sans-serif;white-space:pre-wrap;';
+        box.style.cssText = 'display:block;max-width:100%;margin:4px 0 0;padding:0;border:0;color:inherit;font:inherit;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;';
+        if(row.anchor)row.anchor.after(box);
         box.dataset.historical = !state.baseline || index < lastKnown ? '1' : '0';
         const output = make('div', null, box); output.dataset.chatbridgeOutput = '1';
         make('button', '翻译', box);
       }
-      if (box.dataset.source !== row.text) { box.dataset.source = row.text; box.dataset.translated = '0'; delete box.dataset.autoAttempted; box.querySelector('[data-chatbridge-output]').textContent = ''; }
+      if (changed) { box.dataset.historical = '1'; delete box.dataset.autoAttempted; }
+      if (box.dataset.source !== row.text) { box.dataset.source = row.text; box.dataset.translated = '0'; box.querySelector('button').hidden = false; delete box.dataset.autoAttempted; box.querySelector('[data-chatbridge-output]').textContent = ''; }
       box.querySelector('button').onclick = event => { event.preventDefault(); event.stopPropagation(); translateRow(row, box, true); };
       const automatic = box.dataset.historical === '1' ? state.history : state.incoming;
       if (automatic && box.dataset.translated !== '1' && box.dataset.busy !== '1' && box.dataset.autoAttempted !== '1' && state.automatic < 100) { state.automatic += 1; translateRow(row, box, false); }

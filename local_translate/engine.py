@@ -13,8 +13,10 @@ class Engine:
   folder=self.root/direction
   if not (folder/'model/model.bin').is_file() or not (folder/'sentencepiece.model').is_file():raise ValueError('本地翻译模型缺失，请重新安装完整安装包。')
   self.translator=None;self.tokenizer=None
-  self.tokenizer=spm.SentencePieceProcessor(model_file=str(folder/'sentencepiece.model'))
-  self.translator=ctranslate2.Translator(str(folder/'model'),device='cpu',compute_type='int8',inter_threads=1,intra_threads=min(4,os.cpu_count() or 1))
+  self.tokenizer=spm.SentencePieceProcessor(model_proto=(folder/'sentencepiece.model').read_bytes())
+  # Read with Python's Unicode-aware filesystem API; native Windows fopen cannot reliably open Chinese install paths.
+  files={p.name:p.read_bytes() for p in (folder/'model').iterdir() if p.is_file()}
+  self.translator=ctranslate2.Translator('chatbridge-'+direction,files=files,device='cpu',compute_type='auto',inter_threads=1,intra_threads=min(4,os.cpu_count() or 1))
   self.direction=direction
  def translate(self,text,target):
   if not isinstance(text,str) or not text.strip() or len(text)>10000 or target not in ['en','zh-Hans']:raise ValueError('每次需要 1–10000 个字符，目标语言为中文或英文。')
@@ -57,6 +59,8 @@ def main():
   request={}
   try:
    request=json.loads(line);output=engine.translate(request.get('text'),request.get('target'));response={'id':request.get('id'),'text':output}
-  except Exception:response={'id':request.get('id'),'error':'本地翻译失败：请确认模型完整，并尝试缩短消息。'}
+  except Exception as error:
+   code='E_MODEL_FILE' if isinstance(error,(FileNotFoundError,PermissionError)) else 'E_INPUT' if isinstance(error,ValueError) else 'E_ENGINE'
+   response={'id':request.get('id'),'error':'本地翻译失败（'+code+'），请尝试重新启动软件。','code':code}
   print(json.dumps(response,ensure_ascii=False),flush=True)
 if __name__=='__main__':main()
