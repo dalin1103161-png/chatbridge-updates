@@ -18,14 +18,14 @@ function installPreload(options = {}) {
     try { return await call(method, value); }
     catch (error) { report.textContent = (error.message || '操作失败').replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, ''); return undefined; }
   };
-  const state = { history: false, incoming: false, chat: '', seen: new Set(), baseline: false, serial: Promise.resolve(), jobs: [], draining: false, automatic: 0 };
-  let history, incoming, target, status;
+  const state = { chat: '', serial: Promise.resolve(), jobs: [], draining: false };
+  let target, status;
   function mount() {
     if (!document.body) return;
     let prefs = { language: 'zh', theme: 'cyan', size: 'normal' };
     const words = {
-      zh: { addWA:'＋ 添加 WhatsApp', addSignal:'＋ 添加 Signal', settings:'设置', history:'历史翻译', incoming:'新消息翻译', draft:'输入翻译', ready:'点击消息旁的按钮翻译', title:'工作空间', language:'界面语言', theme:'界面颜色', size:'界面大小', service:'翻译服务', save:'保存设置', close:'关闭', account:'账号备注', add:'添加并扫码', signalInfo:'Signal 账号在右侧固定区域打开，各自独立扫码登录。' },
-      en: { addWA:'＋ Add WhatsApp', addSignal:'＋ Add Signal', settings:'Settings', history:'Translate history', incoming:'Translate new messages', draft:'Translate draft', ready:'Translate messages individually', title:'WORKSPACE', language:'Interface language', theme:'Interface color', size:'Interface size', service:'Translation service', save:'Save settings', close:'Close', account:'Account name', add:'Add and link', signalInfo:'Each Signal account opens in the fixed workspace with its own linked-device identity.' }
+      zh: { addWA:'＋ 添加 WhatsApp', addSignal:'＋ 添加 Signal', settings:'设置', draft:'输入翻译', ready:'自动翻译已开启', title:'工作空间', language:'界面语言', theme:'界面颜色', size:'界面大小', service:'翻译服务', save:'保存设置', close:'关闭', account:'账号备注', add:'添加并扫码', signalInfo:'Signal 账号在右侧固定区域打开，各自独立扫码登录。' },
+      en: { addWA:'＋ Add WhatsApp', addSignal:'＋ Add Signal', settings:'Settings', draft:'Translate draft', ready:'Automatic translation is on', title:'WORKSPACE', language:'Interface language', theme:'Interface color', size:'Interface size', service:'Translation service', save:'Save settings', close:'Close', account:'Account name', add:'Add and link', signalInfo:'Each Signal account opens in the fixed workspace with its own linked-device identity.' }
     };
     let languageNodes = [];
     const label = (tag, key, parent) => { const e=make(tag,words[prefs.language][key],parent); languageNodes.push([e,key]); return e; };
@@ -190,11 +190,7 @@ function installPreload(options = {}) {
       make('button','复制译文 / Copy',form).onclick=async()=>{if(await invoke('copy',output.value,report))report.textContent='已复制，请核对后粘贴发送 / Copied';};
       make('button',words[prefs.language].close,form).onclick=()=>overlay.remove();
     };
-    const hlabel=make('label',null,controls);history=make('input',null,hlabel);history.type='checkbox';label('span','history',hlabel);
-    history.onchange=()=>{state.history=history.checked;state.automatic=0;document.querySelectorAll('[data-chatbridge-message]').forEach(b=>delete b.dataset.autoAttempted);scan();};
-    const nlabel=make('label',null,controls);incoming=make('input',null,nlabel);incoming.type='checkbox';label('span','incoming',nlabel);
-    incoming.onchange=()=>{state.incoming=incoming.checked;state.automatic=0;document.querySelectorAll('[data-chatbridge-message]').forEach(b=>delete b.dataset.autoAttempted);};
-    target=make('select',null,controls);make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';
+    target=make('select',null,controls);target.setAttribute('aria-label','译文语言 / Translation language');make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';target.onchange=scan;
     if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
@@ -239,59 +235,56 @@ function installPreload(options = {}) {
     const title = document.querySelector('.module-ConversationHeader__header__info__title');
     return { chat: title?.textContent?.trim() || '', rows };
   }
-  function translateRow(row, box, manual) {
+  function translateRow(row, box) {
     if (box.dataset.busy === '1') return;
-    const chat = state.chat, language = target.value, original = row.text;
-    box.dataset.busy = '1';
-    if (!manual) box.dataset.autoAttempted = '1';
-    const output = box.querySelector('[data-chatbridge-output]');
-    const button = box.querySelector('button'); button.disabled = true;
-    output.textContent = '等待翻译';
-    state.jobs.push({row,box,manual,chat,language,original,output,button});
+    const chat=state.chat,language=target.value,original=row.text,signature=box.dataset.signature;
+    box.dataset.busy='1';box.dataset.attempted='1';
+    const output=box.querySelector('[data-chatbridge-output]'),button=box.querySelector('button');
+    button.disabled=true;button.hidden=true;output.textContent='翻译中';
+    state.jobs.push({box,chat,language,original,signature,output,button});
     if(state.draining)return;
     state.draining=true;
     state.serial=Promise.resolve().then(async()=>{
       while(state.jobs.length){
         const batch=state.jobs.splice(0,8);
         await Promise.all(batch.map(async job=>{
-          const {row,box,manual,chat,language,original,output,button}=job;
+          const {box,chat,language,original,signature,output,button}=job;
+          const current=()=>state.chat===chat&&target.value===language&&box.isConnected&&box.dataset.signature===signature;
           try{
-            if((!manual&&!(box.dataset.historical==='1'?state.history:state.incoming))||state.chat!==chat||!box.isConnected||box.dataset.source!==original){output.textContent='';return;}
-            output.textContent='翻译中';
+            if(!current())return;
             const result=await invoke('translate',{text:original,target:language},output);
-            if(result!==undefined&&state.chat===chat&&box.isConnected&&box.dataset.source===original){output.textContent=result;box.dataset.translated='1';button.hidden=true;}
-          }finally{box.dataset.busy='0';button.disabled=false;}
+            if(!current())return;
+            if(result!==undefined){output.textContent=result===original?'':result;box.dataset.translated='1';}
+            else button.hidden=false;
+          }finally{
+            box.dataset.busy='0';button.disabled=false;
+            if(box.isConnected&&box.dataset.signature!==signature)scan();
+          }
         }));
       }
     }).finally(()=>{state.draining=false;});
   }
-
   function scan() {
     if (!status) return;
-    const { chat, rows } = messageRows();
-    if (!chat) return;
-    const changed = state.chat !== chat;
-    if (changed) { state.chat = chat; state.seen.clear(); state.baseline = false; state.automatic = 0; }
-    const known = rows.map((r, i) => state.seen.has(r.id) ? i : -1).filter(i => i >= 0);
-    const lastKnown = known.length ? Math.max(...known) : Infinity;
-    for (const [index, row] of rows.entries()) {
-      let box = row.node.querySelector(':scope > [data-chatbridge-message]');
-      if (!box) {
-        box = make('div', null, row.node); box.dataset.chatbridgeMessage = '1';
-        box.style.cssText = 'display:block;max-width:100%;margin:4px 0 0;padding:0;border:0;color:inherit;font:inherit;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;';
+    const {chat,rows}=messageRows();state.chat=chat;
+    if(!chat)return;
+    for(const row of rows){
+      let box=row.node.querySelector(':scope > [data-chatbridge-message]');
+      if(!box){
+        box=make('div',null,row.node);box.dataset.chatbridgeMessage='1';
+        box.style.cssText='display:block;max-width:100%;margin:4px 0 0;padding:0;border:0;color:inherit;font:inherit;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;';
         if(row.anchor)row.anchor.after(box);
-        box.dataset.historical = !state.baseline || index < lastKnown ? '1' : '0';
-        const output = make('div', null, box); output.dataset.chatbridgeOutput = '1';
-        make('button', '翻译', box);
+        const output=make('div',null,box);output.dataset.chatbridgeOutput='1';
+        const retry=make('button','重试翻译',box);retry.hidden=true;
       }
-      if (changed) { box.dataset.historical = '1'; delete box.dataset.autoAttempted; }
-      if (box.dataset.source !== row.text) { box.dataset.source = row.text; box.dataset.translated = '0'; box.querySelector('button').hidden = false; delete box.dataset.autoAttempted; box.querySelector('[data-chatbridge-output]').textContent = ''; }
-      box.querySelector('button').onclick = event => { event.preventDefault(); event.stopPropagation(); translateRow(row, box, true); };
-      const automatic = box.dataset.historical === '1' ? state.history : state.incoming;
-      if (automatic && box.dataset.translated !== '1' && box.dataset.busy !== '1' && box.dataset.autoAttempted !== '1') { state.automatic += 1; translateRow(row, box, false); }
-      state.seen.add(row.id);
+      const signature=JSON.stringify([chat,row.id,row.text,target.value]);
+      if(box.dataset.signature!==signature){
+        box.dataset.signature=signature;box.dataset.translated='0';box.dataset.attempted='0';
+        box.querySelector('button').hidden=true;box.querySelector('[data-chatbridge-output]').textContent='';
+      }
+      box.querySelector('button').onclick=event=>{event.preventDefault();event.stopPropagation();translateRow(row,box);};
+      if(box.dataset.translated!=='1'&&box.dataset.busy!=='1'&&box.dataset.attempted!=='1')translateRow(row,box);
     }
-    if (rows.length) state.baseline = true;
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
   return { scan, state, messageRows };

@@ -23,9 +23,9 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
     }
     const page=pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
     if(page){if(!client){client=await cdp(page.webSocketDebuggerUrl);await client.call('Runtime.enable');await client.call('Log.enable');}
-     const r=await client.call('Runtime.evaluate',{expression:`JSON.stringify({ready:document.readyState,visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||'',toolbar:!!document.querySelector('[data-chatbridge-bar]'),children:document.querySelector('#app-container')?.querySelectorAll('*').length||0,startApp:typeof window.startApp,signalContext:typeof window.SignalContext,loading:document.querySelector('#app-container')?.innerHTML?.slice(0,2000)})`,returnByValue:true});
+     const r=await client.call('Runtime.evaluate',{expression:`JSON.stringify({ready:document.readyState,visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||'',toolbar:!!document.querySelector('[data-chatbridge-bar]'),automatic:/自动翻译已开启|Automatic translation is on/.test(document.querySelector('[data-chatbridge-bar]')?.innerText||''),switches:document.querySelectorAll('[data-chatbridge-bar] input[type=checkbox]').length,children:document.querySelector('#app-container')?.querySelectorAll('*').length||0,startApp:typeof window.startApp,signalContext:typeof window.SignalContext,loading:document.querySelector('#app-container')?.innerHTML?.slice(0,2000)})`,returnByValue:true});
      last=JSON.parse(r.result.value);
-     if(last.ready==='complete'&&last.visible==='visible'&&last.toolbar&&last.children>10&&/link|关联|扫描|device|QR|phone/i.test(last.text)){loaded=true;break;}
+     if(last.ready==='complete'&&last.visible==='visible'&&last.toolbar&&last.automatic&&last.switches===0&&last.children>10&&/link|关联|扫描|device|QR|phone/i.test(last.text)){loaded=true;break;}
     }
    }catch(e){last.error=e.message;}
    await delay(1000);
