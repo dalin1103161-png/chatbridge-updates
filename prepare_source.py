@@ -48,6 +48,8 @@ def prepare(destination, existing=False):
                  "import * as updater from '../ts/updater/index.main.ts';\nimport { installChatBridge } from '../chatbridge/main.cjs';")
     replace_once(main, '  mainWindow = new BrowserWindow(windowOptions);',
                  '  mainWindow = new BrowserWindow(windowOptions);\n  installChatBridge(mainWindow, rootDir);')
+    replace_once(main, '      ...defaultWebPrefs,\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,',
+                 "      ...defaultWebPrefs,\n      additionalArguments: ['--chatbridge-signal-content'],\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,")
     # Preserve Signal URL handling, but never install official Signal over this fork.
     replace_once(main, '  // Second, start checking for app updates\n',
                  '  // ChatBridge: own updater is not configured; do not replace this fork with official Signal.\n  if (app.getName() === \'ChatBridge\') return;\n\n  // Second, start checking for app updates\n')

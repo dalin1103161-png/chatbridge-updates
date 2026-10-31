@@ -12,10 +12,19 @@ function validTranslation(value) {
 }
 
 function installChatBridge(window, rootDir, suppliedElectron) {
+  if (suppliedElectron) return installWorkspace(window, rootDir, suppliedElectron);
+  const electron = require('electron');
+  if (process.platform !== 'win32') throw new Error('ChatBridge managed workspace requires Windows.');
+  const host = require('./host.cjs');
+  if (process.env.CHATBRIDGE_HOST_PIPE) return host.installManagedSignal(window, electron);
+  const native = host.createNativeWorkspace(window, rootDir, electron);
+  return installWorkspace(native.host, rootDir, electron, native);
+}
+function installWorkspace(window, rootDir, suppliedElectron, native) {
   const { app, ipcMain, WebContentsView, clipboard, Notification } = suppliedElectron || require('electron');
   const spawn = suppliedElectron?.spawn || require('node:child_process').spawn;
   let updater;
-  if (!suppliedElectron) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
+  if (!suppliedElectron || native) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
   const registryDir = path.join(app.getPath('appData'), 'ChatBridgeSignalAccounts');
   fs.mkdirSync(registryDir, { recursive: true });
   const currentProfile = process.env.CHATBRIDGE_SIGNAL_PROFILE || 'default';
@@ -29,7 +38,8 @@ function installChatBridge(window, rootDir, suppliedElectron) {
     }
     return result.filter(a => !fs.existsSync(path.join(registryDir, a.id + '.removed')));
   };
-  const launchSignal = id => {
+  const launchSignal = async id => {
+    if(native){for(const view of views.values())view.setVisible(false);activeId=null;await native.open(id);window.webContents.send('chatbridge:signal-active',id);return;}
     if (id === currentProfile) { show(null); return; }
     const account = signalAccounts().find(a => a.id === id);
     if (!account) throw new Error('未知 Signal 账号。');
@@ -42,6 +52,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
   };
   const views = new Map();
   const allowed = new Set([window.webContents.id]);
+  if(native)allowed.add(native.defaultWebContents.id);
   let key = '', region = '', activeId = null;
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
   const filename = path.join(app.getPath('userData'), 'chatbridge-whatsapp.json');
@@ -66,6 +77,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
   };
   function show(id) {
     activeId = id;
+    if(native){if(id===null)native.open(currentProfile).catch(()=>{});else native.hide();}
     for (const [mid, view] of views) view.setVisible(mid === id);
     window.webContents.send('chatbridge:active', id);
     bounds();
@@ -105,7 +117,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
   const authorized = event => {
     if (!allowed.has(event.sender.id)) throw new Error('此页面没有调用翻译接口的权限。');
   };
-  ipcMain.handle('chatbridge:invoke', async (event, method, value) => {
+  const handleRequest = async (event, method, value) => {
     authorized(event);
     if (method === 'settings') {
       if (event.sender.id !== window.webContents.id) throw new Error('请在 Signal 页配置翻译服务。');
@@ -144,6 +156,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
     if (method === 'accounts') return config.accounts;
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='workspace-modal'){if(native)native.suspend(value===true);return true;}
     if (method.startsWith('update-')) {
       if (!updater) throw new Error('更新模块未初始化。');
       if (method === 'update-state') return updater.state();
@@ -167,6 +180,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
       } else {
         const account = signalAccounts().find(a => a.id === value.id); if (!account) throw new Error('未知账号。');
         fs.writeFileSync(path.join(registryDir, account.id + '.removed'), '', { mode: 0o600 });
+        if(native)native.close(account.id);
       }
       return { removed: true, retainedLocalData: true };
     }
@@ -185,12 +199,12 @@ function installChatBridge(window, rootDir, suppliedElectron) {
       throw new Error('未知平台。');
     }
     if (method === 'signal-accounts') return { accounts: signalAccounts(), current: currentProfile };
-    if (method === 'open-signal') { launchSignal(value); return true; }
+    if (method === 'open-signal') { if(!signalAccounts().some(a=>a.id===value))throw new Error('未知 Signal 账号。');await launchSignal(value); return true; }
     if (method === 'add-signal') {
       if (typeof value !== 'string' || !value.trim() || value.trim().length > 40) throw new Error('备注需要 1–40 个字符。');
       const account = { id: crypto.randomUUID(), name: value.trim() };
       fs.writeFileSync(path.join(registryDir, account.id + '.json'), JSON.stringify(account), { flag: 'wx', mode: 0o600 });
-      launchSignal(account.id); return account;
+      await launchSignal(account.id); return account;
     }
     if (method === 'signal') { show(null); return true; }
     if (method === 'whatsapp') {
@@ -204,7 +218,9 @@ function installChatBridge(window, rootDir, suppliedElectron) {
       config.accounts.push(account); save(); openWhatsApp(account); return account;
     }
     throw new Error('未知请求。');
-  });
+  };
+  ipcMain.handle('chatbridge:invoke',handleRequest);
+  if(native)native.setRPC((method,value)=>handleRequest({sender:{id:window.webContents.id}},method,value));
   window.on('resize', bounds);
   let updateTimer;
   if (updater) { updater.check(); updateTimer=setInterval(()=>updater.check(),6*60*60*1000);updateTimer.unref(); }

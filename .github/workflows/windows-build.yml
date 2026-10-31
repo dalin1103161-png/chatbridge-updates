@@ -2,7 +2,7 @@ name: Build ChatBridge Signal on Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, fixed-workspace]
     paths:
       - extension/**
       - prepare_source.py
@@ -49,6 +49,10 @@ jobs:
       - name: Check TypeScript
         working-directory: signal-source
         run: pnpm run check:types
+      - name: Test fixed native workspace on Windows
+        if: github.ref == 'refs/heads/fixed-workspace'
+        timeout-minutes: 3
+        run: node signal-source/node_modules/electron/cli.js tests/native-workspace-smoke.cjs
       - name: Package unsigned Windows application
         working-directory: signal-source
         run: pnpm run build:release --win nsis --x64 --publish=never
@@ -84,6 +88,7 @@ jobs:
           path: signal-source/release/ChatBridge-Setup.exe
           if-no-files-found: error
       - name: Publish public update release
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

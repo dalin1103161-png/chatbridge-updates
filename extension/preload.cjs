@@ -3,6 +3,7 @@
 
 function installPreload(options = {}) {
   const ipc = options.ipc || require('electron').ipcRenderer;
+  const signalContent = process.argv.includes('--chatbridge-signal-content');
   const wa = options.whatsapp ?? process.argv.includes('--chatbridge-whatsapp');
   if (globalThis.__chatbridgeInstalled) return;
   globalThis.__chatbridgeInstalled = true;
@@ -23,8 +24,8 @@ function installPreload(options = {}) {
     if (!document.body) return;
     let prefs = { language: 'zh', theme: 'cyan', size: 'normal' };
     const words = {
-      zh: { addWA:'＋ 添加 WhatsApp', addSignal:'＋ 添加 Signal', settings:'设置', history:'历史翻译', incoming:'新消息翻译', draft:'输入翻译', ready:'点击消息旁的按钮翻译', title:'工作空间', language:'界面语言', theme:'界面颜色', size:'界面大小', service:'翻译服务', save:'保存设置', close:'关闭', account:'账号备注', add:'添加并扫码', signalInfo:'每个 Signal 账号使用独立窗口和登录身份。' },
-      en: { addWA:'＋ Add WhatsApp', addSignal:'＋ Add Signal', settings:'Settings', history:'Translate history', incoming:'Translate new messages', draft:'Translate draft', ready:'Translate messages individually', title:'WORKSPACE', language:'Interface language', theme:'Interface color', size:'Interface size', service:'Translation service', save:'Save settings', close:'Close', account:'Account name', add:'Add and link', signalInfo:'Each Signal account has its own window and linked-device identity.' }
+      zh: { addWA:'＋ 添加 WhatsApp', addSignal:'＋ 添加 Signal', settings:'设置', history:'历史翻译', incoming:'新消息翻译', draft:'输入翻译', ready:'点击消息旁的按钮翻译', title:'工作空间', language:'界面语言', theme:'界面颜色', size:'界面大小', service:'翻译服务', save:'保存设置', close:'关闭', account:'账号备注', add:'添加并扫码', signalInfo:'Signal 账号在右侧固定区域打开，各自独立扫码登录。' },
+      en: { addWA:'＋ Add WhatsApp', addSignal:'＋ Add Signal', settings:'Settings', history:'Translate history', incoming:'Translate new messages', draft:'Translate draft', ready:'Translate messages individually', title:'WORKSPACE', language:'Interface language', theme:'Interface color', size:'Interface size', service:'Translation service', save:'Save settings', close:'Close', account:'Account name', add:'Add and link', signalInfo:'Each Signal account opens in the fixed workspace with its own linked-device identity.' }
     };
     let languageNodes = [];
     const label = (tag, key, parent) => { const e=make(tag,words[prefs.language][key],parent); languageNodes.push([e,key]); return e; };
@@ -46,10 +47,10 @@ function installPreload(options = {}) {
     `;
     const shell = make('div',null,document.body); shell.dataset.cbShell='1';
     const bar = make('div',null,shell); bar.dataset.chatbridgeBar='1';
-    bar.style.cssText='position:fixed;top:'+(wa?0:32)+'px;left:'+(wa?0:200)+'px;right:0;height:'+(wa?48:76)+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
+    bar.style.cssText='position:fixed;top:'+((wa||signalContent)?0:32)+'px;left:'+((wa||signalContent)?0:200)+'px;right:0;height:'+((wa||signalContent)?48:76)+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
     const top = make('div',null,bar); top.style.cssText='display:flex;align-items:center;gap:10px;overflow-x:auto;flex-shrink:0;';
     const controls = make('div',null,bar); controls.style.cssText='display:flex;align-items:center;gap:15px;overflow-x:auto;flex-shrink:0;';
-    if (wa) { top.remove(); controls.style.height='100%'; }
+    if (wa||signalContent) { top.remove(); controls.style.height='100%'; }
     const applyPrefs = () => {
       const palettes={cyan:['#080e1a','#101b2d','#e6f4ff','#8aa1b9','#42e8df'],violet:['#100d20','#201a35','#f1eaff','#a79cbe','#b394ff'],light:['#eef3f8','#ffffff','#122337','#54687d','#087f8c']};
       const colors=palettes[prefs.theme]||palettes.cyan;
@@ -62,12 +63,13 @@ function installPreload(options = {}) {
     const modal = title => {
       document.querySelector('[data-cb-modal]')?.remove();
       const overlay=make('div',null,document.body);overlay.dataset.cbModal='1';
+      if(!wa&&!signalContent){call('workspace-modal',true).catch(()=>{});const remove=overlay.remove.bind(overlay);overlay.remove=()=>{remove();call('workspace-modal',false).catch(()=>{});};}
       const form=make('div',null,overlay);form.dataset.cbDialog='1';form.setAttribute('role','dialog');form.setAttribute('aria-modal','true');
       make('h2',title,form); overlay.onclick=e=>{if(e.target===overlay)overlay.remove();};
       overlay.onkeydown=e=>{if(e.key==='Escape')overlay.remove();};applyPrefs();return {overlay,form};
     };
     let accounts, load;
-    if (!wa) {
+    if (!wa && !signalContent) {
       const sidebar=make('div',null,shell);sidebar.dataset.cbSidebar='1';
       sidebar.style.cssText='position:fixed;left:0;top:32px;bottom:0;width:200px;z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
       const brand=make('b','CB',sidebar);brand.style.cssText='text-align:center;color:var(--cb-accent);letter-spacing:3px;font-size:16px;margin-bottom:12px;';
@@ -88,10 +90,10 @@ function installPreload(options = {}) {
             const symbol=make('span',null,open);symbol.innerHTML=svg;symbol.style.cssText='color:'+(platform==='whatsapp'?'#42e698':'#78a8ff')+';flex-shrink:0;';
             const caption=make('span',account.name,open);caption.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';open.title=account.name;
             const count=badges.get(account.id)||0;if(count){const badge=make('span',count>99?'99+':String(count),open);badge.style.cssText='border-radius:20px;background:#f05179;color:white;padding:1px 5px;font-size:10px;';}
-            open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||account.id===currentSignal){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
+            open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
             const rename=make('button','⋯',row);rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
             rename.onclick=async()=>{await invoke('signal',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
-              remove.onclick=()=>{form.replaceChildren();make('h2','确认删除账号？ / Remove account?',form);make('p',account.name,form);make('p','仅从账号列表移除，保留本地登录和聊天数据；不会删除手机上的账号。Signal 已打开的窗口需手动关闭。',form);const report=make('span','',form);const confirm=make('button','确认删除 / Confirm removal',form);confirm.style.color='#ff8095';confirm.onclick=async()=>{confirm.disabled=true;const result=await invoke('remove-account',{platform,id:account.id},report);confirm.disabled=false;if(result){await load();await loadSignals();overlay.remove();status.textContent='账号已从列表移除，本地数据已保留';}};make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
+              remove.onclick=()=>{form.replaceChildren();make('h2','确认删除账号？ / Remove account?',form);make('p',account.name,form);make('p','仅从账号列表移除，保留本地登录和聊天数据；不会删除手机上的账号。',form);const report=make('span','',form);const confirm=make('button','确认删除 / Confirm removal',form);confirm.style.color='#ff8095';confirm.onclick=async()=>{confirm.disabled=true;const result=await invoke('remove-account',{platform,id:account.id},report);confirm.disabled=false;if(result){await load();await loadSignals();overlay.remove();status.textContent='账号已从列表移除，本地数据已保留';}};make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
               make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
           }
         }
@@ -173,7 +175,7 @@ function installPreload(options = {}) {
       };
       load().catch(()=>{});
     }
-    if(!wa&&ipc.on)ipc.on('chatbridge:active',(_e,id)=>{controls.style.display=id?'none':'flex';});
+    if(!wa&&!signalContent&&ipc.on)ipc.on('chatbridge:active',(_e,id)=>{controls.style.display=id?'none':'flex';});
     const compose=label('button','draft',controls);
     compose.onclick=()=>{
       const {overlay,form}=modal('中文草稿 → English');form.dataset.chatbridgeCompose='1';
@@ -191,7 +193,7 @@ function installPreload(options = {}) {
     target=make('select',null,controls);make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
-    layout.textContent=wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:200px!important;right:0!important;bottom:0!important;width:calc(100% - 200px)!important;height:calc(100% - 108px)!important;}';
+    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:200px!important;right:0!important;bottom:0!important;width:calc(100% - 200px)!important;height:calc(100% - 108px)!important;}';
     call('preferences').then(p=>{if(p&&['zh','en'].includes(p.language)){prefs=p;applyPrefs();}}).catch(()=>{});
     if(ipc.on)ipc.on('chatbridge:preferences',(_e,p)=>{prefs=p;applyPrefs();});
     applyPrefs();setInterval(scan,1000);scan();
