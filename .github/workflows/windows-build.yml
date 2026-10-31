@@ -56,6 +56,12 @@ jobs:
       - name: Package unsigned Windows application
         working-directory: signal-source
         run: pnpm run build:release --win nsis --x64 --publish=never
+      - name: Save installer before startup verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-startup-test-installer
+          path: signal-source/release/ChatBridge-Setup.exe
+          if-no-files-found: error
       - name: Verify packaged Signal login renders
         if: github.ref == 'refs/heads/fixed-workspace'
         timeout-minutes: 3
