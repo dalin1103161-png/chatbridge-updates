@@ -53,7 +53,7 @@ test('isolates two WhatsApp sessions and switches within the application', async
     assert.equal(va.visible, false); assert.equal(vb.visible, true);
     assert.equal(vb.url, 'https://web.whatsapp.com/');
     assert.equal(vb.bounds.y, 108);
-    assert.equal(vb.bounds.x,200);
+    assert.equal(vb.bounds.x,144);
     assert(!vb.ua.includes('Electron/'));
     await f.invoke('signal'); assert.equal(vb.visible, false);
     const config = JSON.parse(fs.readFileSync(path.join(f.temp, 'chatbridge-whatsapp.json')));
@@ -128,5 +128,17 @@ test('removing accounts persists the list change, closes WhatsApp view and rejec
   await f.invoke('remove-account',{platform:'signal',id:'default'});
   assert.equal((await f.invoke('signal-accounts')).accounts.length,0);
   await assert.rejects(f.invoke('remove-account',{platform:'signal',id:'../outside'}),/未知/);
+ }finally{f.close();}
+});
+
+
+test('sidebar width repositions WhatsApp views, persists on release and rejects page writes',async()=>{
+ const f=fixture();try{
+  assert.equal((await f.invoke('sidebar-width')).width,144);const a=await f.invoke('add-whatsapp','Work');
+  await f.invoke('sidebar-width',{width:112,persist:false});assert.equal(f.instance.views.get(a.id).bounds.x,112);assert.equal(f.instance.views.get(a.id).bounds.width,988);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).sidebarWidth,undefined);
+  await f.invoke('sidebar-width',{width:112,persist:true});assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).sidebarWidth,112);
+  for(const width of [0,87,321,112.5])await assert.rejects(f.invoke('sidebar-width',{width,persist:true}),/无效/);
+  await assert.rejects(f.invoke('sidebar-width',{width:100,persist:true},f.instance.views.get(a.id).webContents.id),/顶部/);
  }finally{f.close();}
 });

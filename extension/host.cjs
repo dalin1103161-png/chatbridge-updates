@@ -7,7 +7,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const host=new BrowserWindow({width:1280,height:900,minWidth:900,minHeight:650,title:'ChatBridge',backgroundColor:'#080e1a',autoHideMenuBar:true,webPreferences:{preload:path.join(rootDir,'chatbridge/shell-preload.cjs'),sandbox:false,contextIsolation:true,nodeIntegration:false}});
  host.loadFile(path.join(rootDir,'chatbridge/shell.html'));
  const pipe='\\\\.\\pipe\\chatbridge-'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex');
- const windows=new Map(),children=new Map(),pending=new Map();let active=null,sequence=0,ready=false,closed=false,suspended=false;
+ const windows=new Map(),children=new Map(),pending=new Map();let sidebarWidth=144,active=null,sequence=0,ready=false,closed=false,suspended=false;
  let rpc=async()=>{throw Error('Workspace is initializing');};
  const worker=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(rootDir,'chatbridge/native-window.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  const report=state=>{if(!host.isDestroyed())host.webContents.send('chatbridge:workspace-status',state);};
@@ -17,7 +17,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  worker.stdin.on('error',()=>{});
  worker.on('error',e=>error('内嵌窗口控制器启动失败：'+e.message));worker.stderr.on('data',()=>{});
  const command=record=>{if(!ready||closed)return;const [width,height]=host.getContentSize();const scale=screen.getDisplayMatching(host.getBounds()).scaleFactor;
-  const id=++sequence;worker.stdin.write(JSON.stringify({id,parent:hwnd(host),child:record.hwnd,pid:record.pid,x:Math.round(200*scale),y:Math.round(108*scale),width:Math.round(Math.max(1,width-200)*scale),height:Math.round(Math.max(1,height-108)*scale),visible:record.id===active&&!suspended,attach:!record.attached})+'\n');pending.set(id,record);};
+  const id=++sequence;worker.stdin.write(JSON.stringify({id,parent:hwnd(host),child:record.hwnd,pid:record.pid,x:Math.round(sidebarWidth*scale),y:Math.round(108*scale),width:Math.round(Math.max(1,width-sidebarWidth)*scale),height:Math.round(Math.max(1,height-108)*scale),visible:record.id===active&&!suspended,attach:!record.attached})+'\n');pending.set(id,record);};
  readline.createInterface({input:worker.stdout}).on('line',line=>{try{const m=JSON.parse(line);if(m.ready){ready=true;for(const r of windows.values())command(r);return;}const r=pending.get(m.id);pending.delete(m.id);if(r?.complete){r.complete(m);return;}if(m.error)error('Signal 内嵌失败：'+m.error);else if(r){r.attached=true;r.actualParent=m.parent;applyElectronVisibility(r);}}catch{}});
  const layout=()=>{for(const r of windows.values())command(r);};
  for(const event of ['resize','move','show','restore'])host.on(event,layout);
@@ -67,7 +67,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(quit)app.quit();
   })();return stopping;
  };
- const controller={host,shutdown,snapshot:()=>({parent:hwnd(host),active,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
+ const controller={host,shutdown,setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   async open(id){active=id;if(id==='default'||windows.has(id)){layout();return;}await listening;
    if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
     const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}

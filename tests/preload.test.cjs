@@ -91,3 +91,12 @@ test('each account appears separately in the sidebar',async()=>{
 test('home entry and welcome cards open the correct account flow',async()=>{
  const f=fixture(false,'<!doctype html><body><main data-chatbridge-home><button id="cb-home-whatsapp">WhatsApp</button><button id="cb-home-signal">Signal</button></main></body>');try{const d=f.dom.window.document;await d.querySelector('[data-cb-home-button]').onclick();assert(f.calls.some(c=>c.method==='home'));d.querySelector('#cb-home-whatsapp').click();await new Promise(r=>setTimeout(r,0));assert(d.querySelector('[data-chatbridge-add-account]'));}finally{await f.close();}
 });
+
+
+test('sidebar drag clamps width, saves on release and supports reset and keyboard controls',async()=>{
+ const f=fixture();try{await f.api.state.serial;const d=f.dom.window.document,resize=d.querySelector('[data-cb-resizer]');assert(resize);assert.equal(resize.getAttribute('aria-valuenow'),'144');
+  resize.onpointerdown({button:0,pointerId:1,clientX:144,preventDefault(){}});resize.onpointermove({clientX:104});resize.onpointerup();
+  assert.equal(d.documentElement.style.getPropertyValue('--cb-sidebar-width'),'104px');assert(f.calls.some(c=>c.method==='sidebar-width'&&c.value?.width===104&&c.value.persist===true));
+  resize.onkeydown({key:'Home',preventDefault(){}});assert.equal(resize.getAttribute('aria-valuenow'),'88');resize.onkeydown({key:'End',preventDefault(){}});assert.equal(resize.getAttribute('aria-valuenow'),'320');resize.ondblclick();assert.equal(resize.getAttribute('aria-valuenow'),'144');
+ }finally{await f.close();}
+});

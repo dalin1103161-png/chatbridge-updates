@@ -47,7 +47,7 @@ function installPreload(options = {}) {
     `;
     const shell = make('div',null,document.body); shell.dataset.cbShell='1';
     const bar = make('div',null,shell); bar.dataset.chatbridgeBar='1';
-    bar.style.cssText='position:fixed;top:'+((wa||signalContent)?0:32)+'px;left:'+((wa||signalContent)?0:200)+'px;right:0;height:'+((wa||signalContent)?48:76)+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
+    bar.style.cssText='position:fixed;top:'+((wa||signalContent)?0:32)+'px;left:'+((wa||signalContent)?'0px':'var(--cb-sidebar-width,144px)')+';right:0;height:'+((wa||signalContent)?48:76)+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
     const top = make('div',null,bar); top.style.cssText='display:flex;align-items:center;gap:10px;overflow-x:auto;flex-shrink:0;';
     const controls = make('div',null,bar); controls.style.cssText='display:flex;align-items:center;gap:15px;overflow-x:auto;flex-shrink:0;';
     if (wa||signalContent) { top.remove(); controls.style.height='100%'; }
@@ -71,8 +71,21 @@ function installPreload(options = {}) {
     let accounts, load;
     if (!wa && !signalContent) {
       const sidebar=make('div',null,shell);sidebar.dataset.cbSidebar='1';
-      sidebar.style.cssText='position:fixed;left:0;top:32px;bottom:0;width:200px;z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
-      const brand=make('button','⌂ 主页',sidebar);brand.title='返回主页 / Home';brand.dataset.cbHomeButton='1';brand.style.cssText='text-align:center;color:var(--cb-accent);letter-spacing:3px;font-size:16px;margin-bottom:12px;';
+      sidebar.style.cssText='position:fixed;left:0;top:32px;bottom:0;width:var(--cb-sidebar-width,144px);z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
+      let sidebarWidth=144,dragging=false,frame=null,pendingWidth=144,previousSelect='',previousCursor='',dragStartX=0,dragStartWidth=144,touched=false;
+      const resize=make('div',null,shell);resize.dataset.cbResizer='1';resize.setAttribute('role','separator');resize.setAttribute('aria-label','调整账号栏宽度');resize.setAttribute('aria-orientation','vertical');resize.setAttribute('aria-valuemin','88');resize.setAttribute('aria-valuemax','320');resize.tabIndex=0;resize.title='拖动调整宽度，双击恢复默认';
+      resize.style.cssText='position:fixed;left:calc(var(--cb-sidebar-width,144px) - 8px);top:32px;bottom:0;width:8px;z-index:2147483647;cursor:col-resize;touch-action:none;';
+      const resizeCSS=make('style',null,document.head);resizeCSS.textContent='[data-cb-resizer]:hover,[data-cb-resizer]:focus-visible,[data-cb-resizer][data-dragging]{border-right:2px solid #42e8df;background:#42e8df25;outline:none}[data-cb-compact] [data-cb-account-name]{display:none}[data-cb-compact] [data-cb-account]>button:first-child{position:relative;justify-content:center;padding:8px 4px;gap:0}[data-cb-compact] [data-cb-account]>button:last-child{width:20px!important;flex-shrink:0}[data-cb-compact] [data-cb-unread]{position:absolute;right:0;top:0;font-size:9px!important;padding:0 3px!important}';
+      const applyWidth=value=>{sidebarWidth=Math.max(88,Math.min(320,Math.round(value)));document.documentElement.style.setProperty('--cb-sidebar-width',sidebarWidth+'px');shell.toggleAttribute('data-cb-compact',sidebarWidth<120);resize.setAttribute('aria-valuenow',String(sidebarWidth));};
+      const sendWidth=persist=>call('sidebar-width',{width:sidebarWidth,persist}).catch(()=>{});
+      const scheduleWidth=value=>{pendingWidth=value;applyWidth(value);if(frame===null)frame=(globalThis.requestAnimationFrame||((fn)=>setTimeout(fn,16)))(()=>{frame=null;applyWidth(pendingWidth);sendWidth(false);});};
+      const endResize=()=>{if(!dragging)return;dragging=false;resize.removeAttribute('data-dragging');document.documentElement.style.userSelect=previousSelect;document.documentElement.style.cursor=previousCursor;if(frame!==null){(globalThis.cancelAnimationFrame||clearTimeout)(frame);frame=null;}sendWidth(true);};
+      resize.onpointerdown=event=>{if(event.button!==0)return;event.preventDefault();dragging=true;touched=true;dragStartX=event.clientX;dragStartWidth=sidebarWidth;previousSelect=document.documentElement.style.userSelect;previousCursor=document.documentElement.style.cursor;document.documentElement.style.userSelect='none';document.documentElement.style.cursor='col-resize';resize.setAttribute('data-dragging','');resize.setPointerCapture?.(event.pointerId);resize.focus();};
+      resize.onpointermove=event=>{if(dragging)scheduleWidth(dragStartWidth+event.clientX-dragStartX);};resize.onpointerup=endResize;resize.onpointercancel=endResize;resize.onlostpointercapture=endResize;
+      resize.ondblclick=()=>{touched=true;applyWidth(144);sendWidth(true);};
+      resize.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();touched=true;applyWidth(event.key==='Home'?88:event.key==='End'?320:sidebarWidth+(event.key==='ArrowLeft'?-8:8));sendWidth(true);};
+      applyWidth(144);call('sidebar-width').then(value=>{if(Number.isInteger(value?.width)&&!touched)applyWidth(value.width);}).catch(()=>{});
+      const brand=make('button','⌂ 主页',sidebar);brand.title='返回主页 / Home';brand.dataset.cbHomeButton='1';brand.style.cssText='text-align:center;color:var(--cb-accent);letter-spacing:1px;font-size:14px;margin-bottom:12px;width:100%;height:42px;padding:8px;';
       const icon=(name,svg)=>{const b=make('button',null,sidebar);b.title=name;b.setAttribute('aria-label',name);b.innerHTML=svg;return b;};
       const signal=icon('Signal','<svg viewBox="0 0 24 24"><circle cx="12" cy="11" r="9" stroke-dasharray="2.5 2"/><path d="M6 18l-2 4 5-2M8 8h8M8 12h6"/></svg>');
       const whatsapp=icon('WhatsApp','<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 1-12 7l-5 2 1-5a8 8 0 1 1 16-4Z"/><path d="M8 7c0 5 3 7 7 7l1-2-3-1-1 1-2-2 1-1-1-2Z"/></svg>');
@@ -90,8 +103,8 @@ function installPreload(options = {}) {
             row.style.cssText='display:flex;gap:3px;align-items:center;border:1px solid '+(selected===row.dataset.cbAccount?'var(--cb-accent)':'#ffffff18')+';border-radius:12px;background:linear-gradient(120deg,#ffffff0d,transparent);';
             const open=make('button',null,row);open.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0;width:auto;height:48px;padding:8px;border:0;text-align:left;';
             const symbol=make('span',null,open);symbol.innerHTML=svg;symbol.style.cssText='color:'+(platform==='whatsapp'?'#42e698':'#78a8ff')+';flex-shrink:0;';
-            const caption=make('span',account.name,open);caption.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';open.title=account.name;
-            const count=badges.get(account.id)||0;if(count){const badge=make('span',count>99?'99+':String(count),open);badge.style.cssText='border-radius:20px;background:#f05179;color:white;padding:1px 5px;font-size:10px;';}
+            const caption=make('span',account.name,open);caption.dataset.cbAccountName='1';caption.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';open.title=account.name;
+            const count=badges.get(account.id)||0;if(count){const badge=make('span',count>99?'99+':String(count),open);badge.dataset.cbUnread='1';badge.style.cssText='border-radius:20px;background:#f05179;color:white;padding:1px 5px;font-size:10px;';}
             open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
             const rename=make('button','⋯',row);rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
             rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
@@ -194,7 +207,7 @@ function installPreload(options = {}) {
     if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
-    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:200px!important;right:0!important;bottom:0!important;width:calc(100% - 200px)!important;height:calc(100% - 108px)!important;}';
+    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 108px)!important;}';
     call('preferences').then(p=>{if(p&&['zh','en'].includes(p.language)){prefs=p;applyPrefs();}}).catch(()=>{});
     if(ipc.on)ipc.on('chatbridge:preferences',(_e,p)=>{prefs=p;applyPrefs();});
     applyPrefs();setInterval(scan,1000);

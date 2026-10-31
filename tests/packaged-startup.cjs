@@ -19,7 +19,15 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
     if(home&&!homeVerified){
      if(!homeClient)homeClient=await cdp(home.webSocketDebuggerUrl);
      const h=await homeClient.call('Runtime.evaluate',{expression:`!!document.querySelector('[data-chatbridge-home]')&&document.body.innerText.includes('各位销冠都开大单')&&!!document.querySelector('[data-cb-account="signal:default"] > button')`,returnByValue:true});
-     if(h.result.value){homeVerified=true;const shot=await homeClient.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'homepage.png'),Buffer.from(shot.data,'base64'));await homeClient.call('Runtime.evaluate',{expression:`document.querySelector('[data-cb-account="signal:default"] > button').click()`});}
+     if(h.result.value){
+      const size=await homeClient.call('Runtime.evaluate',{expression:`Number(document.querySelector('[data-cb-resizer]').getAttribute('aria-valuenow'))`,returnByValue:true});
+      const initial=size.result.value,targetWidth=initial<120?168:108;
+      await homeClient.call('Input.dispatchMouseEvent',{type:'mousePressed',x:initial-4,y:250,button:'left',buttons:1,clickCount:1});
+      for(let step=1;step<=4;step++)await homeClient.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:initial-4+(targetWidth-initial)*step/4,y:250,button:'left',buttons:1});
+      await homeClient.call('Input.dispatchMouseEvent',{type:'mouseReleased',x:targetWidth-4,y:250,button:'left',buttons:0,clickCount:1});
+      const resized=await homeClient.call('Runtime.evaluate',{expression:`Math.round(document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width)`,returnByValue:true});
+      if(resized.result.value!==targetWidth)throw Error('Sidebar mouse drag did not update its width');
+      console.log('PACKAGED_SIDEBAR_DRAG_PASS',initial,'to',targetWidth);homeVerified=true;const shot=await homeClient.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'homepage.png'),Buffer.from(shot.data,'base64'));await homeClient.call('Runtime.evaluate',{expression:`document.querySelector('[data-cb-account="signal:default"] > button').click()`});}
     }
     const page=pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
     if(page){if(!client){client=await cdp(page.webSocketDebuggerUrl);await client.call('Runtime.enable');await client.call('Log.enable');}

@@ -64,6 +64,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       throw new Error('WhatsApp 账号配置格式错误。');
     }
   }
+  let sidebarWidth=Number.isInteger(config.sidebarWidth)&&config.sidebarWidth>=88&&config.sidebarWidth<=320?config.sidebarWidth:144;
+  native?.setSidebarWidth(sidebarWidth);
   const save = () => {
     const temp = filename + '.' + crypto.randomUUID() + '.tmp';
     fs.writeFileSync(temp, JSON.stringify(config), { encoding: 'utf8', mode: 0o600 });
@@ -75,7 +77,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const unread = new Map();
   const bounds = () => {
     const [width, height] = window.getContentSize();
-    for (const view of views.values()) view.setBounds({ x: 200, y: 108, width: Math.max(1, width - 200), height: Math.max(1, height - 108) });
+    for (const view of views.values()) view.setBounds({ x: sidebarWidth, y: 108, width: Math.max(1, width - sidebarWidth), height: Math.max(1, height - 108) });
   };
   function show(id) {
     activeId = id;
@@ -141,6 +143,13 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if (method === 'accounts') return config.accounts;
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='sidebar-width'){
+      if(value===undefined)return {width:sidebarWidth};
+      if(!value||!Number.isInteger(value.width)||value.width<88||value.width>320||typeof value.persist!=='boolean')throw new Error('侧栏宽度无效。');
+      sidebarWidth=value.width;native?.setSidebarWidth(sidebarWidth);bounds();
+      if(value.persist){config.sidebarWidth=sidebarWidth;save();}
+      return {width:sidebarWidth};
+    }
     if(method==='home'){activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');return true;}
     if(method==='workspace-modal'){if(native)native.suspend(value===true);return true;}
     if (method.startsWith('update-')) {

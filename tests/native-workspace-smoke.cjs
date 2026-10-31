@@ -23,6 +23,7 @@ app.whenReady().then(async()=>{
   const s=controller.snapshot();assert.equal(s.active,b);assert(s.windows.every(r=>r.actualParent===s.parent));
   assert.equal(new Set(s.windows.map(r=>r.pid)).size,3);
   await controller.open(a);assert.equal(controller.snapshot().active,a);assert.equal(controller.snapshot().windows.length,3);
+  controller.setSidebarWidth(104);await wait(()=>Math.abs(w.getContentSize()[0]-(controller.host.getContentSize()[0]-104))<=2);assert.equal(controller.snapshot().sidebarWidth,104);
   controller.hide();assert.equal(controller.snapshot().active,null);
   controller.close(b);assert(!controller.snapshot().windows.some(r=>r.id===b));
   console.log('NATIVE_WORKSPACE_SMOKE_PASS: three isolated processes attached to one parent; switching reuses windows');
