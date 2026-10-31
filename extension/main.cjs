@@ -140,6 +140,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if (method === 'accounts') return config.accounts;
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='home'){activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');return true;}
     if(method==='workspace-modal'){if(native)native.suspend(value===true);return true;}
     if (method.startsWith('update-')) {
       if (!updater) throw new Error('更新模块未初始化。');
@@ -166,6 +167,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         fs.writeFileSync(path.join(registryDir, account.id + '.removed'), '', { mode: 0o600 });
         if(native)native.close(account.id);
       }
+      activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');
       return { removed: true, retainedLocalData: true };
     }
     if (method === 'rename-account') {

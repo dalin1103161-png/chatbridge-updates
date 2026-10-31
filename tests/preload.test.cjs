@@ -118,3 +118,12 @@ test('history translation stays enabled across chats until manually switched off
   assert.equal(f.calls.filter(c=>c.method==='translate').length,before);
  }finally{f.close();}
 });
+
+
+test('home entry and welcome cards open the correct account flow',async()=>{
+ const f=fixture(false,'<!doctype html><body><main data-chatbridge-home><button id="cb-home-whatsapp">WhatsApp</button><button id="cb-home-signal">Signal</button></main></body>');try{
+  const d=f.dom.window.document;await d.querySelector('[data-cb-home-button]').onclick();
+  assert(f.calls.some(c=>c.method==='home'));
+  d.querySelector('#cb-home-whatsapp').click();await new Promise(r=>setTimeout(r,0));assert(d.querySelector('[data-chatbridge-add-account]'));
+ }finally{f.close();}
+});

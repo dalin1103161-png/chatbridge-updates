@@ -7,7 +7,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const host=new BrowserWindow({width:1280,height:900,minWidth:900,minHeight:650,title:'ChatBridge',backgroundColor:'#080e1a',autoHideMenuBar:true,webPreferences:{preload:path.join(rootDir,'chatbridge/shell-preload.cjs'),sandbox:false,contextIsolation:true,nodeIntegration:false}});
  host.loadFile(path.join(rootDir,'chatbridge/shell.html'));
  const pipe='\\\\.\\pipe\\chatbridge-'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex');
- const windows=new Map(),children=new Map(),pending=new Map();let active='default',sequence=0,ready=false,closed=false,suspended=false;
+ const windows=new Map(),children=new Map(),pending=new Map();let active=null,sequence=0,ready=false,closed=false,suspended=false;
  let rpc=async()=>{throw Error('Workspace is initializing');};
  const worker=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(rootDir,'chatbridge/native-window.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  const report=state=>{if(!host.isDestroyed())host.webContents.send('chatbridge:workspace-status',state);};
@@ -31,7 +31,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const attach=(id,handle,pid)=>{windows.set(id,{id,hwnd:handle,pid,attached:false});layout();};
  const originalShow=signalWindow.show.bind(signalWindow),originalHide=signalWindow.hide.bind(signalWindow);
  signalWindow.webContents.setBackgroundThrottling(false);
- signalWindow.hide();signalWindow.setSkipTaskbar(true);attach('default',hwnd(signalWindow),process.pid);
+ signalWindow.hide();signalWindow.setMenuBarVisibility(false);signalWindow.setSkipTaskbar(true);attach('default',hwnd(signalWindow),process.pid);
  signalWindow.show=()=>layout();signalWindow.showInactive=()=>layout();
  signalWindow.on('show',layout);signalWindow.webContents.on('did-finish-load',layout);
  const clients=new Set();
@@ -72,13 +72,13 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
     const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}
    layout();
-  },suspend(value){suspended=value;layout();},hide(){active=null;layout();},close(id){const child=children.get(id);if(child)child.kill();children.delete(id);windows.delete(id);},
+  },suspend(value){suspended=value;layout();},hide(){active=null;layout();},close(id){if(id==='default'){if(active===id)active=null;layout();return;}const child=children.get(id);if(child)child.kill();children.delete(id);windows.delete(id);},
  };
  host.on('close',event=>{event.preventDefault();shutdown().catch(e=>{error(e.message);app.quit();});});
  return controller;
 }
 function installManagedSignal(window,electron){
- const {ipcMain,app}=electron;window.setSkipTaskbar(true);window.hide();
+ const {ipcMain,app}=electron;window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
  const originalShow=window.show.bind(window),originalHide=window.hide.bind(window);window.webContents.setBackgroundThrottling(false);
  let electronVisible=false;
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);

@@ -72,13 +72,15 @@ function installPreload(options = {}) {
     if (!wa && !signalContent) {
       const sidebar=make('div',null,shell);sidebar.dataset.cbSidebar='1';
       sidebar.style.cssText='position:fixed;left:0;top:32px;bottom:0;width:200px;z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
-      const brand=make('b','CB',sidebar);brand.style.cssText='text-align:center;color:var(--cb-accent);letter-spacing:3px;font-size:16px;margin-bottom:12px;';
+      const brand=make('button','⌂ 主页',sidebar);brand.title='返回主页 / Home';brand.dataset.cbHomeButton='1';brand.style.cssText='text-align:center;color:var(--cb-accent);letter-spacing:3px;font-size:16px;margin-bottom:12px;';
       const icon=(name,svg)=>{const b=make('button',null,sidebar);b.title=name;b.setAttribute('aria-label',name);b.innerHTML=svg;return b;};
       const signal=icon('Signal','<svg viewBox="0 0 24 24"><circle cx="12" cy="11" r="9" stroke-dasharray="2.5 2"/><path d="M6 18l-2 4 5-2M8 8h8M8 12h6"/></svg>');
       const whatsapp=icon('WhatsApp','<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 1-12 7l-5 2 1-5a8 8 0 1 1 16-4Z"/><path d="M8 7c0 5 3 7 7 7l1-2-3-1-1 1-2-2 1-1-1-2Z"/></svg>');
       signal.style.display='none';whatsapp.style.display='none';
       const accountList=make('div',null,sidebar);accountList.dataset.cbAccountList='1';accountList.style.cssText='display:grid;align-content:start;gap:8px;overflow-y:auto;min-height:0;flex:1;';
-      let waList=[],signalList=[],currentSignal='default',selected='signal:default';
+      let waList=[],signalList=[],currentSignal='default',selected=null;
+      brand.onclick=async()=>{if(await invoke('home',null,status)){selected=null;renderAccounts();}};
+      if(ipc.on)ipc.on('chatbridge:home',()=>{selected=null;renderAccounts();});
       const badges=new Map();
       const renderAccounts=()=>{
         accountList.replaceChildren();
@@ -92,7 +94,7 @@ function installPreload(options = {}) {
             const count=badges.get(account.id)||0;if(count){const badge=make('span',count>99?'99+':String(count),open);badge.style.cssText='border-radius:20px;background:#f05179;color:white;padding:1px 5px;font-size:10px;';}
             open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
             const rename=make('button','⋯',row);rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
-            rename.onclick=async()=>{await invoke('signal',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
+            rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
               remove.onclick=()=>{form.replaceChildren();make('h2','确认删除账号？ / Remove account?',form);make('p',account.name,form);make('p','仅从账号列表移除，保留本地登录和聊天数据；不会删除手机上的账号。',form);const report=make('span','',form);const confirm=make('button','确认删除 / Confirm removal',form);confirm.style.color='#ff8095';confirm.onclick=async()=>{confirm.disabled=true;const result=await invoke('remove-account',{platform,id:account.id},report);confirm.disabled=false;if(result){await load();await loadSignals();overlay.remove();status.textContent='账号已从列表移除，本地数据已保留';}};make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
               make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
           }
@@ -111,19 +113,19 @@ function installPreload(options = {}) {
       call('update-state').then(s=>{if(s)displayUpdate(s);}).catch(()=>{});
       updateButton.onclick=async()=>{
         if(!updateState.available){const s=await invoke('update-check',null,status);if(s){displayUpdate(s);status.textContent=s.message;}return;}
-        await invoke('signal',null,status);
+        await invoke('home',null,status);
         const {overlay,form}=modal('更新 ChatBridge');make('p','更新包含新的 Signal 内核及 ChatBridge 功能。请先关闭其他账号窗口，安装时保留原安装位置。账号数据不存放在程序目录。',form);
         const report=make('span','',form);const install=make('button','下载并启动安装',form);install.onclick=async()=>{install.disabled=true;await invoke('update-install',null,report);install.disabled=false;};make('button','稍后',form).onclick=()=>overlay.remove();
       };
 
       accounts=make('select');accounts.setAttribute('aria-label','WhatsApp accounts');accounts.style.maxWidth='190px';
       load=async()=>{const list=await call('accounts');waList=list;renderAccounts();const previous=accounts.value;accounts.replaceChildren();make('option','WhatsApp',accounts).value='';for(const a of list)make('option',a.name,accounts).value=a.id;accounts.value=previous;};
-      const mark=id=>{selected=id?'whatsapp:'+id:'signal:'+currentSignal;renderAccounts();};
+      const mark=id=>{selected=id?'whatsapp:'+id:null;renderAccounts();};
       signal.onclick=async()=>{if(await invoke('signal',null,status))mark(null);};
       const openWA=async()=>{if(!accounts.value){add.click();return;}if(await invoke('whatsapp',accounts.value,status))mark(accounts.value);};
       whatsapp.onclick=openWA;accounts.onchange=openWA;
       add.onclick=async()=>{
-        await invoke('signal',null,status);mark(null);
+        await invoke('home',null,status);mark(null);
         const {overlay,form}=modal(words[prefs.language].addWA);form.dataset.chatbridgeAddAccount='1';
         const input=make('input',null,form);input.value='WhatsApp '+accounts.options.length;input.maxLength=40;input.placeholder=words[prefs.language].account;
         const report=make('span','',form),save=make('button',words[prefs.language].add,form);
@@ -139,7 +141,7 @@ function installPreload(options = {}) {
       };
       signalSelect.onchange=async()=>{if(await invoke('open-signal',signalSelect.value,status))status.textContent=words[prefs.language].signalInfo;};
       addSignal.onclick=async()=>{
-        await invoke('signal',null,status);mark(null);await loadSignals();
+        await invoke('home',null,status);mark(null);await loadSignals();
         const {overlay,form}=modal(words[prefs.language].addSignal);
         make('p',words[prefs.language].signalInfo,form);
         const input=make('input',null,form);input.maxLength=40;input.value='Signal '+(signalSelect.options.length+1);
@@ -148,12 +150,14 @@ function installPreload(options = {}) {
         save.onclick=submit;input.onkeydown=e=>{if(e.key==='Enter')submit();};
         make('button',words[prefs.language].close,form).onclick=()=>overlay.remove();input.focus();input.select();
       };
+      const homeWA=document.querySelector('#cb-home-whatsapp'),homeSignal=document.querySelector('#cb-home-signal');
+      if(homeWA)homeWA.onclick=()=>add.click();if(homeSignal)homeSignal.onclick=()=>addSignal.click();
       loadSignals().catch(()=>{});
       if(ipc.on)ipc.on('chatbridge:launch-error',(_e,message)=>{status.textContent=message;});
       if(ipc.on)ipc.on('chatbridge:workspace-status',(_e,s)=>{if(s.error)status.textContent=s.error;});
 
       settings.onclick=async()=>{
-        await invoke('signal',null,status);mark(null);
+        await invoke('home',null,status);mark(null);
         const {overlay,form}=modal(words[prefs.language].settings);form.dataset.chatbridgeSettings='1';
         const ws=await call('window-settings');
         const titleLabel=make('label','窗口名称 / Window name',form),windowName=make('input',null,titleLabel);windowName.value=ws?.title||'ChatBridge';windowName.maxLength=80;
@@ -175,7 +179,7 @@ function installPreload(options = {}) {
       };
       load().catch(()=>{});
     }
-    if(!wa&&!signalContent&&ipc.on)ipc.on('chatbridge:active',(_e,id)=>{controls.style.display=id?'none':'flex';});
+    if(!wa&&!signalContent&&ipc.on)ipc.on('chatbridge:active',(_e,id)=>{controls.style.display=document.querySelector('[data-chatbridge-home]')?'none':id?'none':'flex';});
     const compose=label('button','draft',controls);
     compose.onclick=()=>{
       const {overlay,form}=modal('中文草稿 → English');form.dataset.chatbridgeCompose='1';
@@ -191,6 +195,7 @@ function installPreload(options = {}) {
     const nlabel=make('label',null,controls);incoming=make('input',null,nlabel);incoming.type='checkbox';label('span','incoming',nlabel);
     incoming.onchange=()=>{state.incoming=incoming.checked;state.automatic=0;document.querySelectorAll('[data-chatbridge-message]').forEach(b=>delete b.dataset.autoAttempted);};
     target=make('select',null,controls);make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';
+    if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
     layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:200px!important;right:0!important;bottom:0!important;width:calc(100% - 200px)!important;height:calc(100% - 108px)!important;}';
