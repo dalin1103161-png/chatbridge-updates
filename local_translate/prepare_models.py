@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Fetch reviewed model archives during the BUILD, never at translation time."""
-import argparse, hashlib, json, shutil, urllib.request, zipfile
+import argparse, hashlib, json, shutil, subprocess, zipfile
 from pathlib import Path
 MODELS = {
  'en-zh': ('https://argos-net.com/v1/translate-en_zh-1_9.argosmodel', '433e7c4f034d87fbe2353161e05f18646d7999452f801a4e1f0378522b9850ab'),
@@ -12,7 +12,7 @@ def prepare(dest, cache):
   archive=cache/(direction+'.argosmodel')
   if not archive.exists():
    part=archive.with_suffix('.part')
-   with urllib.request.urlopen(url,timeout=120) as response, part.open('wb') as output: shutil.copyfileobj(response,output)
+   subprocess.run(['curl','--fail','--location','--retry','3','--connect-timeout','30','--max-time','240','--user-agent','Mozilla/5.0 ChatBridge-Model-Builder','--output',str(part),url],check=True)
    part.replace(archive)
   if hashlib.file_digest(archive.open('rb'),'sha256').hexdigest()!=digest: raise ValueError('Model checksum mismatch: '+direction)
   target=dest/direction;target.mkdir(exist_ok=True)
