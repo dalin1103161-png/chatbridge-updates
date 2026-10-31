@@ -56,6 +56,17 @@ jobs:
       - name: Package unsigned Windows application
         working-directory: signal-source
         run: pnpm run build:release --win nsis --x64 --publish=never
+      - name: Verify packaged Signal login renders
+        if: github.ref == 'refs/heads/fixed-workspace'
+        timeout-minutes: 3
+        run: node tests/packaged-startup.cjs
+      - name: Save startup diagnostics
+        if: always() && github.ref == 'refs/heads/fixed-workspace'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-startup-diagnostics
+          path: startup-diagnostics/
+          if-no-files-found: ignore
       - name: Require executable output
         shell: pwsh
         run: |

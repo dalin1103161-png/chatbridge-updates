@@ -150,6 +150,7 @@ function installPreload(options = {}) {
       };
       loadSignals().catch(()=>{});
       if(ipc.on)ipc.on('chatbridge:launch-error',(_e,message)=>{status.textContent=message;});
+      if(ipc.on)ipc.on('chatbridge:workspace-status',(_e,s)=>{if(s.error)status.textContent=s.error;});
 
       settings.onclick=async()=>{
         await invoke('signal',null,status);mark(null);
