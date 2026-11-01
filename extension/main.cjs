@@ -82,7 +82,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(value!==undefined&&savedZoom[key]!==state.percent){savedZoom[key]=state.percent;config.chatZoom=savedZoom;save();}
     return state;
   };
-  const attachZoom=(contents,platform,id)=>zoomBindings.set(contents.id,bindZoom(contents,value=>accountZoom(platform,id,value)));
+  const attachZoom=(contents,platform,id)=>zoomBindings.set(contents.id,bindZoom(contents,value=>accountZoom(platform,id,value),{keepScale:platform==='signal'}));
   bindInput(window.webContents);
   if(native)bindInput(native.defaultWebContents,undefined,{nativeEditing:true});
   attachZoom(native?.defaultWebContents||window.webContents,'signal',currentProfile);

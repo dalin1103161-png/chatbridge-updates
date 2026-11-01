@@ -102,7 +102,7 @@ function installManagedSignal(window,electron){
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
  readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(m.focus){if(electronVisible)window.webContents.focus();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility){originalShow();window.webContents.focus();}else{originalHide();socket.write(JSON.stringify({hidden:true})+'\n');}}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
  const request=(method,value)=>connected.then(()=>new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');}));
- const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value));
+ const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value),{keepScale:true});
  ipcMain.handle('chatbridge:invoke',(event,method,value)=>{
   if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom','edit'].includes(method))throw Error('Unsupported child request');
   if(method==='edit')return edit(event.sender,value);

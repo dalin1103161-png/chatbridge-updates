@@ -9,14 +9,16 @@ function zoomState(saved,value){
  }
  return {percent,min:MIN,max:MAX};
 }
-function bindZoom(contents,request){
+function bindZoom(contents,request,{keepScale=false}={}){
  // Recent Electron versions support isolated zoom; separate account partitions
  // and Signal profile processes also keep legacy per-origin zoom independent.
  contents.setZoomMode?.('isolated');
- let serial=Promise.resolve();
+ let serial=Promise.resolve(),expectedFactor;
+ const reconcile=()=>{if(expectedFactor!==undefined&&!contents.isDestroyed?.()&&contents.getZoomFactor&&Math.abs(contents.getZoomFactor()-expectedFactor)>0.001)contents.setZoomFactor(expectedFactor);};
+ if(keepScale){const timer=setInterval(reconcile,500);timer.unref?.();contents.once('destroyed',()=>clearInterval(timer));}
  const apply=value=>{
   const job=serial.then(()=>request(value)).then(state=>{
-   if(!contents.isDestroyed?.()){contents.setZoomFactor(state.percent/100);contents.send('chatbridge:zoom',state);}
+   if(!contents.isDestroyed?.()){expectedFactor=state.percent/100;contents.setZoomFactor(expectedFactor);contents.send('chatbridge:zoom',state);}
    return state;
   });serial=job.catch(()=>{});return job;
  };

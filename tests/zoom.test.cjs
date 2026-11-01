@@ -14,3 +14,8 @@ test('native shortcut and mouse-wheel requests change the bound page only',async
  wc.emit('zoom-changed',{},'out');await apply();assert.equal(wc.factor,1);
  wc.emit('before-input-event',{preventDefault(){}},{type:'keyDown',control:true,key:'0'});await apply();assert.equal(wc.factor,1);assert.equal(wc.last.name,'chatbridge:zoom');
 });
+
+test('saved chat zoom survives a late native reset during Signal initialization',async()=>{
+ const contents=new EventEmitter();let factor=1;contents.getZoomFactor=()=>factor;contents.setZoomFactor=value=>factor=value;contents.send=()=>{};contents.isDestroyed=()=>false;
+ const apply=bindZoom(contents,()=>({percent:110,min:50,max:200}),{keepScale:true});await apply();assert.equal(factor,1.1);factor=1;await new Promise(r=>setTimeout(r,650));assert.equal(factor,1.1);contents.emit('destroyed');
+});
