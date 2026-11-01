@@ -23,4 +23,6 @@ function bindSignalUnread(contents,ipcMain,publish){
  ipcMain.on('set-badge-count',badge);ipcMain.on('update-tray-icon',tray);ipcMain.on('chatbridge:signal-unread',raw);
  contents.once('destroyed',()=>{ipcMain.removeListener('set-badge-count',badge);ipcMain.removeListener('update-tray-icon',tray);ipcMain.removeListener('chatbridge:signal-unread',raw);});
 }
-module.exports={validCount,titleUnread,createUnreadState,bindSignalUnread};
+// Read only aggregate metadata. Do not serialize chats, contacts or message bodies.
+const whatsappUnreadScript=`(()=>{try{const collection=(typeof window.require==='function'?window.require('WAWebCollections')?.Chat:null)||window.Store?.Chat;if(!collection||typeof collection.getModelsArray!=='function')return null;const rows=collection.getModelsArray();if(!Array.isArray(rows))return null;let total=0,known=rows.length===0;for(const row of rows){const count=row.unreadCount;if(count==null)continue;if(!Number.isSafeInteger(count)||count< -1)return null;known=true;total+=Math.max(0,count);if(!Number.isSafeInteger(total))return null;}return known?total:null;}catch{return null;}})()`;
+module.exports={validCount,titleUnread,createUnreadState,bindSignalUnread,whatsappUnreadScript};

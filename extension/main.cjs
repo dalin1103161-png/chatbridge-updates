@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {zoomState,bindZoom}=require('./zoom.cjs');
 const {bindInput,edit}=require('./input.cjs');
-const {createUnreadState,titleUnread,validCount}=require('./unread.cjs');
+const {createUnreadState,titleUnread,validCount,whatsappUnreadScript}=require('./unread.cjs');
 
 function validTranslation(value) {
   if (!value || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 10000 || !['en', 'zh-Hans'].includes(value.target)) {
@@ -90,6 +90,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const updateTitle = () => window.setTitle?.(config.windowTitle || 'ChatBridge');
   updateTitle();
   window.webContents.on?.('page-title-updated', event => { if (config.windowTitle) { event.preventDefault(); updateTitle(); } });
+  const waUnreadReaders=new Map();
   const unread=createUnreadState(entry=>window.webContents.send('chatbridge:unread',entry));
   const reportSignalUnread=(id,count)=>{if(signalAccounts().some(a=>a.id===id))unread.update('signal',id,count);};
   window.on('chatbridge:signal-unread',reportSignalUnread);
@@ -105,6 +106,14 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     bounds();
     if(id!==null)focusWhatsApp(id);
   }
+  const updateWhatsAppUnread=(account,count,notify=true)=>{
+    if(!config.accounts.some(a=>a.id===account.id))return;
+    const previous=unread.snapshot().find(e=>e.platform==='whatsapp'&&e.id===account.id)?.count;
+    const changed=unread.update('whatsapp',account.id,count);
+    if(changed&&notify&&previous!==undefined&&count>previous&&config.notifications!==false&&Notification?.isSupported()){
+      const toast=new Notification({title:account.name,body:'WhatsApp 有新消息',silent:config.sound===false});toast.on('click',()=>{window.show?.();window.focus?.();openWhatsApp(account);});toast.show();
+    }
+  };
   function ensureWhatsApp(account) {
     if (!views.has(account.id)) {
       const view = new WebContentsView({ webPreferences: {
@@ -126,16 +135,19 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         try { const parsed = new URL(url); if (parsed.protocol !== 'https:' || parsed.hostname !== 'web.whatsapp.com') event.preventDefault(); }
         catch { event.preventDefault(); }
       });
-      view.webContents.on('page-title-updated', (_event, title) => {
-        const count=titleUnread(title);if(count===null)return;
-        const previous=unread.snapshot().find(e=>e.platform==='whatsapp'&&e.id===account.id)?.count;
-        unread.update('whatsapp',account.id,count);
-        if (previous !== undefined && count > previous && config.notifications !== false && Notification?.isSupported()) {
-          const toast = new Notification({ title: account.name, body: 'WhatsApp 有新消息', silent: config.sound === false });
-          toast.on('click', () => { window.show?.(); window.focus?.(); openWhatsApp(account); }); toast.show();
-        }
-      });
-      view.webContents.on('did-finish-load',()=>{if(activeId===account.id)focusWhatsApp(account.id);});
+      let authoritative=false,busy=false,misses=0,lastFallback=null,stopped=false;
+      const sample=async()=>{
+        if(stopped||busy||view.webContents.isDestroyed()||typeof view.webContents.executeJavaScript!=='function')return;busy=true;
+        try{const count=await view.webContents.executeJavaScript(whatsappUnreadScript);
+          if(stopped)return;if(validCount(count)){const wasAuthoritative=authoritative;authoritative=true;misses=0;updateWhatsAppUnread(account,count,wasAuthoritative);}
+          else if(++misses>=3){authoritative=false;if(lastFallback!==null)updateWhatsAppUnread(account,lastFallback);}
+        }catch{if(++misses>=3)authoritative=false;}finally{busy=false;}
+      };
+      const reader={reportTitle(count){lastFallback=count;if(authoritative){sample();return;}updateWhatsAppUnread(account,count);},stop(){stopped=true;clearInterval(timer);}};
+      const timer=setInterval(sample,1000);timer.unref?.();waUnreadReaders.set(account.id,reader);
+      view.webContents.once('destroyed',()=>{reader.stop();waUnreadReaders.delete(account.id);});
+      view.webContents.on('page-title-updated',(_event,title)=>{const count=titleUnread(title);if(count!==null)reader.reportTitle(count);});
+      view.webContents.on('did-finish-load',()=>{authoritative=false;misses=0;sample();if(activeId===account.id)focusWhatsApp(account.id);});
       view.webContents.loadURL('https://web.whatsapp.com/');
     }
   }
@@ -147,7 +159,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     authorized(event);
     if(method==='edit')return edit(event.sender,value);
     if(method==='unread-state'){if(event.sender.id!==window.webContents.id)throw Error('仅工作空间可读取未读状态。');return unread.snapshot();}
-    if(method==='unread-report'){const account=config.accounts.find(a=>views.get(a.id)?.webContents.id===event.sender.id);if(!account||!validCount(value))throw Error('未读状态无效。');unread.update('whatsapp',account.id,value);return true;}
+    if(method==='unread-report'){const account=config.accounts.find(a=>views.get(a.id)?.webContents.id===event.sender.id);if(!account||!validCount(value))throw Error('未读状态无效。');waUnreadReaders.get(account.id)?.reportTitle(value);return true;}
     if(method==='input-diagnostics')return native?native.inputDiagnostics():{available:false};
     if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
@@ -198,7 +210,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         config.accounts.splice(index, 1); save();
         const view = views.get(value.id);
         if (view) { allowed.delete(view.webContents.id); zoomBindings.delete(view.webContents.id); window.contentView.removeChildView?.(view); if (!view.webContents.isDestroyed()) view.webContents.close(); views.delete(value.id); }
-        unread.remove('whatsapp',value.id); if (activeId === value.id) show(null);
+        waUnreadReaders.get(value.id)?.stop();waUnreadReaders.delete(value.id);unread.remove('whatsapp',value.id); if (activeId === value.id) show(null);
       } else {
         const account = signalAccounts().find(a => a.id === value.id); if (!account) throw new Error('未知账号。');
         fs.writeFileSync(path.join(registryDir, account.id + '.removed'), '', { mode: 0o600 });
@@ -253,6 +265,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(updateTimer)clearInterval(updateTimer);
     ipcMain.removeHandler('chatbridge:invoke');
     for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
+    for(const reader of waUnreadReaders.values())reader.stop();waUnreadReaders.clear();
     clearTimeout(warmupTimer);allowed.clear(); views.clear(); zoomBindings.clear(); translator.close();
   });
   return { show, views };
