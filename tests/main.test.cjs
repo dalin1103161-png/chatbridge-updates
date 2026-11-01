@@ -178,3 +178,13 @@ test('mixed account order survives restart, new accounts append, removed keys di
   await f.invoke('remove-account',{platform:'whatsapp',id:b.id});assert.deepEqual(await f.invoke('account-order'),order.slice(1).concat('whatsapp:'+c.id));
  }finally{restarted?.close();f.close();}
 });
+
+test('settings zoom targets its account, persists scale and rejects writes from chat pages',async()=>{
+ const f=fixture();try{const a=await f.invoke('add-whatsapp','One'),b=await f.invoke('add-whatsapp','Two');
+ const target={platform:'whatsapp',id:a.id};assert.equal((await f.invoke('workspace-zoom',target)).percent,100);
+ assert.equal((await f.invoke('workspace-zoom',{...target,action:'out'})).percent,90);assert.equal(f.instance.views.get(a.id).zoomFactor,.9);assert.notEqual(f.instance.views.get(b.id).zoomFactor,.9);
+ await assert.rejects(f.invoke('workspace-zoom',{...target,action:'in'},f.instance.views.get(b.id).webContents.id),/顶部/);
+ await assert.rejects(f.invoke('workspace-zoom',{...target,id:'missing'}),/有效账号/);
+ assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).chatZoom['whatsapp:'+a.id],90);
+ }finally{f.close();}
+});

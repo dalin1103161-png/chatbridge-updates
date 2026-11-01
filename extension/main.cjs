@@ -24,7 +24,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
   return installWorkspace(native.host, rootDir, electron, native);
 }
 function installWorkspace(window, rootDir, suppliedElectron, native) {
-  const { app, ipcMain, WebContentsView, clipboard, Notification } = suppliedElectron || require('electron');
+  const { app, ipcMain, WebContentsView, clipboard, Notification, Menu } = suppliedElectron || require('electron');
   const spawn = suppliedElectron?.spawn || require('node:child_process').spawn;
   let updater;
   if (!suppliedElectron || native) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
@@ -126,6 +126,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       allowed.add(view.webContents.id);
       bindInput(view.webContents,{focus:()=>{focusWhatsApp(account.id).catch(()=>{});}});
       attachZoom(view.webContents,'whatsapp',account.id);
+      require('./context-menu.cjs').bindContextMenu(view.webContents,window,Menu);
       window.contentView.addChildView(view);
       view.setVisible(false);
       const ua = view.webContents.getUserAgent().replace(/\b(?:Electron|ChatBridge|Signal)\/[^\s]+\s*/g, '');
@@ -175,13 +176,24 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       if (value === undefined) return config.preferences || fallback;
       if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 设置调整界面。');
       if (!value || !['zh','en'].includes(value.language) || !['cyan','violet','light'].includes(value.theme) || !['compact','normal','large'].includes(value.size)) throw new Error('界面设置无效。');
-      config.preferences = { language: value.language, theme: value.theme, size: value.size }; save();
+      if(value.translationTarget!==undefined&&!['zh-Hans','en'].includes(value.translationTarget))throw Error('翻译语言无效。');
+      config.preferences = { language: value.language, theme: value.theme, size: value.size, ...(value.translationTarget?{translationTarget:value.translationTarget}:{}) }; save();
       for (const view of views.values()) view.webContents.send('chatbridge:preferences', config.preferences);
-      return config.preferences;
+      native?.preferences(config.preferences);return config.preferences;
     }
     if (method === 'accounts') return config.accounts;
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='workspace-zoom'){
+      if(!value||!['signal','whatsapp'].includes(value.platform)||typeof value.id!=='string'||!(value.platform==='signal'?signalAccounts():config.accounts).some(a=>a.id===value.id))throw Error('请选择有效账号。');
+      const state=accountZoom(value.platform,value.id,value.action===undefined?undefined:{action:value.action});
+      if(value.action!==undefined){
+        if(value.platform==='whatsapp'){const view=views.get(value.id);if(view)await zoomBindings.get(view.webContents.id)?.();}
+        else if(value.id===currentProfile)await zoomBindings.get(native?.defaultWebContents.id||window.webContents.id)?.();
+        else native?.refreshZoom(value.id);
+      }
+      return state;
+    }
     if(method==='account-order'){
       const keys=[...signalAccounts().map(a=>'signal:'+a.id),...config.accounts.map(a=>'whatsapp:'+a.id)];
       const current=[...new Set([...(Array.isArray(config.accountOrder)?config.accountOrder:[]).filter(key=>keys.includes(key)),...keys])];

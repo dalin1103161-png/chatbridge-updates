@@ -94,6 +94,8 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  }
  const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,lastModifiers,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   start:ensureSignal,
+  refreshZoom(id){const client=[...clients].find(c=>c.chatbridgeProfile===id);if(client&&!client.destroyed)client.write(JSON.stringify({refreshZoom:true})+'\n');},
+  preferences(value){signalWindow.webContents.send('chatbridge:preferences',value);for(const client of clients)if(client.chatbridgeProfile&&!client.destroyed)client.write(JSON.stringify({preferences:value})+'\n');},
   async open(id){active=id;await ensureSignal(id);layout();requestSignalFocus();},suspend(value){suspended=value;layout();if(!value)requestSignalFocus();},hide(){active=null;layout();},close(id){if(id==='default'){if(active===id)active=null;layout();return;}const child=children.get(id);if(child)child.kill();children.delete(id);windows.delete(id);},
  };
  host.on('close',event=>{event.preventDefault();shutdown().catch(e=>{error(e.message);app.quit();});});
@@ -110,7 +112,7 @@ function installManagedSignal(window,electron){
  window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
- readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(m.focus){if(electronVisible)window.webContents.focus();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility){originalShow();window.webContents.focus();}else{originalHide();socket.write(JSON.stringify({hidden:true})+'\n');}}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
+ readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(m.refreshZoom){applyZoom().catch(()=>{});return;}if(m.preferences){window.webContents.send('chatbridge:preferences',m.preferences);return;}if(m.focus){if(electronVisible)window.webContents.focus();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility){originalShow();window.webContents.focus();}else{originalHide();socket.write(JSON.stringify({hidden:true})+'\n');}}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
  const request=(method,value)=>connected.then(()=>new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');}));
  const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value),{keepScale:true});
  ipcMain.handle('chatbridge:invoke',(event,method,value)=>{

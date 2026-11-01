@@ -36,7 +36,7 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
     if(page){if(!client){client=await cdp(page.webSocketDebuggerUrl);await client.call('Runtime.enable');await client.call('Log.enable');}
      const r=await client.call('Runtime.evaluate',{expression:`JSON.stringify({ready:document.readyState,visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||'',toolbar:!!document.querySelector('[data-chatbridge-bar]'),automatic:/自动翻译已开启|Automatic translation is on/.test(document.querySelector('[data-chatbridge-bar]')?.innerText||''),switches:document.querySelectorAll('[data-chatbridge-bar] input[type=checkbox]').length,children:document.querySelector('#app-container')?.querySelectorAll('*').length||0,startApp:typeof window.startApp,signalContext:typeof window.SignalContext,loading:document.querySelector('#app-container')?.innerHTML?.slice(0,2000)})`,returnByValue:true});
      last=JSON.parse(r.result.value);
-     if(last.ready==='complete'&&last.visible==='visible'&&last.toolbar&&last.automatic&&last.switches===0&&last.children>10&&/link|关联|扫描|device|QR|phone/i.test(last.text)){loaded=true;break;}
+     if(last.ready==='complete'&&last.visible==='visible'&&!last.toolbar&&last.switches===0&&last.children>10&&/link|关联|扫描|device|QR|phone/i.test(last.text)){loaded=true;break;}
     }
    }catch(e){last.error=e.message;}
    await delay(1000);
@@ -45,7 +45,11 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
   if(!loaded&&client){const attempt=await client.call('Runtime.evaluate',{expression:`(()=>{try{window.startApp();return 'startApp called';}catch(e){return e.stack;}})()`,returnByValue:true});fs.writeFileSync(path.join(output,'start-attempt.json'),JSON.stringify(attempt,null,2));}
   if(loaded&&client){
    const evaluate=async expression=>{const r=await client.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Zoom evaluation failed: '+(r.exceptionDetails.exception?.description||r.exceptionDetails.text));return r.result.value;};
-   const zoom=()=>evaluate(`Number(document.querySelector('[data-cb-zoom-reset]').textContent.replace('%',''))`);
+   const hostEval=async expression=>{const r=await homeClient.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.text);return r.result.value;};
+   await hostEval(`document.querySelector('[aria-label="Settings"]').onclick()`);
+   const zoom=()=>hostEval(`Number(document.querySelector('[data-cb-zoom-reset]').textContent.replace('%',''))`);
+   if(await evaluate(`document.querySelector('#app-container').getBoundingClientRect().top`)!==0)throw Error('Removed chat toolbar still reserves space');
+   console.log('PACKAGED_NO_CHAT_TOOLBAR_PASS');
    const waitZoom=async expected=>{const deadline=Date.now()+5000;while(await zoom()!==expected){if(Date.now()>deadline)throw Error('Zoom did not reach '+expected);await delay(50);}};
    const initial=await zoom();console.log('PACKAGED_ZOOM_INITIAL',initial);
    if(initial!==(process.env.CHATBRIDGE_STARTUP_LABEL==='second-launch'?110:100))throw Error('Saved chat zoom did not restore');
@@ -54,20 +58,21 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    const waitRendered=async percent=>{const deadline=Date.now()+5000;let dpr;do{dpr=await evaluate('devicePixelRatio');if(Math.abs(dpr/hostDpr-percent/100)<=0.03)return dpr;await delay(100);}while(Date.now()<deadline);throw Error('Rendered zoom did not reach '+percent+': '+dpr);};
    const restoredDpr=await waitRendered(initial);console.log('PACKAGED_RESTORED_ZOOM_DPR',restoredDpr);
 
-   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);const baseDpr=await waitRendered(100);
-   await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);let zoomDpr=await waitRendered(110);const dprDeadline=Date.now()+5000;while(Math.abs(zoomDpr/baseDpr-1.1)>0.03&&Date.now()<dprDeadline){await delay(100);zoomDpr=await evaluate('devicePixelRatio');}console.log('PACKAGED_ZOOM_DPR',JSON.stringify({baseDpr,zoomDpr,percent:await zoom()}));if(Math.abs(zoomDpr/baseDpr-1.1)>0.03)throw Error('Content did not enlarge: '+JSON.stringify({baseDpr,zoomDpr}));
-   await evaluate(`document.querySelector('[data-cb-zoom-out]').click()`);await waitZoom(100);await waitRendered(100);
+   await hostEval(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);const baseDpr=await waitRendered(100);
+   await hostEval(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);let zoomDpr=await waitRendered(110);const dprDeadline=Date.now()+5000;while(Math.abs(zoomDpr/baseDpr-1.1)>0.03&&Date.now()<dprDeadline){await delay(100);zoomDpr=await evaluate('devicePixelRatio');}console.log('PACKAGED_ZOOM_DPR',JSON.stringify({baseDpr,zoomDpr,percent:await zoom()}));if(Math.abs(zoomDpr/baseDpr-1.1)>0.03)throw Error('Content did not enlarge: '+JSON.stringify({baseDpr,zoomDpr}));
+   await hostEval(`document.querySelector('[data-cb-zoom-out]').click()`);await waitZoom(100);await waitRendered(100);
    // CDP key injection bypasses Electron before-input-event; native shortcut wiring is covered in zoom.test.cjs.
-   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);await waitRendered(110);
+   await hostEval(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);await hostEval(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);await waitRendered(110);
    const hostAfter=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
    if(hostAfter.result.value!==hostBefore.result.value)throw Error('Chat zoom changed the outer workspace');
-   console.log('PACKAGED_CHAT_ZOOM_PASS: buttons, persisted scale and independent workspace scale');
+   console.log('PACKAGED_SETTINGS_ZOOM_PASS: per-account buttons, persisted scale and independent workspace scale');
+   await hostEval(`document.querySelector('[data-cb-modal]').remove();document.querySelector('[data-cb-account="signal:default"] > button').click()`);await delay(500);
   }
   if(client){const shot=await client.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-login.png'),Buffer.from(shot.data,'base64'));}
   if(!homeVerified)throw Error('Packaged homepage did not become ready');
   if(!loaded)throw Error('Packaged Signal login did not become visible: '+JSON.stringify(last));
   console.log('PACKAGED_HOMEPAGE_PASS: homepage rendered and account navigation works');
-  console.log('PACKAGED_SIGNAL_STARTUP_PASS: real Signal login content and translation toolbar visible');
+  console.log('PACKAGED_SIGNAL_STARTUP_PASS: real Signal login content visible without chat toolbar');
  }finally{homeClient?.close();if(client){await client.call('Browser.close').catch(()=>{});client.close();}await delay(1000);if(app.exitCode===null)app.kill();outputLog.end();
  const logDir=path.join(process.env.APPDATA||'','ChatBridgeSignal','logs');if(fs.existsSync(logDir))for(const name of fs.readdirSync(logDir).filter(n=>n.endsWith('.log')))fs.copyFileSync(path.join(logDir,name),path.join(output,'signal-'+name));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

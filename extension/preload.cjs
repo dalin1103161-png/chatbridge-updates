@@ -74,6 +74,7 @@ function installPreload(options = {}) {
         host.style.fontSize=({compact:11,normal:13,large:15})[prefs.size]+'px';host.style.colorScheme=prefs.theme==='light'?'light':'dark';
       }
       for(const [e,k] of languageNodes)e.textContent=words[prefs.language][k];
+      if(target){const next=prefs.translationTarget||'zh-Hans';if(target.value!==next){target.value=next;scan();}}
     };
     const modal = title => {
       document.querySelector('[data-cb-modal]')?.remove();
@@ -206,8 +207,18 @@ function installPreload(options = {}) {
       if(ipc.on)ipc.on('chatbridge:workspace-status',(_e,s)=>{if(s.error)status.textContent=s.error;});
 
       settings.onclick=async()=>{
-        await invoke('home',null,status);mark(null);
+        const previousAccount=selected;await invoke('home',null,status);mark(null);
         const {overlay,form}=modal(words[prefs.language].settings);form.dataset.chatbridgeSettings='1';
+        const zoomLabel=make('label','聊天内容缩放 / Chat zoom',form),zoomAccount=make('select',null,zoomLabel);zoomAccount.dataset.cbZoomAccount='1';
+        for(const row of accountList.children){const key=row.dataset.cbAccount;const [platform,id]=[key.slice(0,key.indexOf(':')),key.slice(key.indexOf(':')+1)];const account=(platform==='signal'?signalList:waList).find(a=>a.id===id);if(account)make('option',(platform==='signal'?'Signal · ':'WhatsApp · ')+account.name,zoomAccount).value=key;}
+        if(previousAccount)zoomAccount.value=previousAccount;
+        const zoomGroup=make('div',null,form);zoomGroup.dataset.cbZoom='1';zoomGroup.style.cssText='display:flex;gap:8px;align-items:center;';
+        const less=make('button','−',zoomGroup),reset=make('button','100%',zoomGroup),more=make('button','＋',zoomGroup),zoomReport=make('small','',form);
+        less.dataset.cbZoomOut='1';reset.dataset.cbZoomReset='1';more.dataset.cbZoomIn='1';
+        const changeZoom=async action=>{const key=zoomAccount.value;if(!key)return;const colon=key.indexOf(':');for(const b of [less,reset,more])b.disabled=true;const result=await invoke('workspace-zoom',{platform:key.slice(0,colon),id:key.slice(colon+1),...(action?{action}:{})},zoomReport);if(result&&zoomAccount.value===key){reset.textContent=result.percent+'%';less.disabled=result.percent<=result.min;reset.disabled=false;more.disabled=result.percent>=result.max;zoomReport.textContent='自动保存 · 每个账号独立缩放 / Saved per account';}};
+        less.onclick=()=>changeZoom('out');reset.onclick=()=>changeZoom('reset');more.onclick=()=>changeZoom('in');zoomAccount.onchange=()=>changeZoom();await changeZoom();
+        make('button','输入翻译 / Translate draft',form).onclick=()=>compose.click();
+        const translationLabel=make('label','消息译文语言 / Translation language',form),translationTarget=make('select',null,translationLabel);make('option','中文',translationTarget).value='zh-Hans';make('option','English',translationTarget).value='en';translationTarget.value=prefs.translationTarget||'zh-Hans';
         const ws=await call('window-settings');
         const titleLabel=make('label','窗口名称 / Window name',form),windowName=make('input',null,titleLabel);windowName.value=ws?.title||'ChatBridge';windowName.maxLength=80;
         const notificationLabel=make('label','WhatsApp 桌面提示 / Desktop alerts',form),notification=make('input',null,notificationLabel);notification.type='checkbox';notification.checked=ws?.notifications!==false;
@@ -218,7 +229,7 @@ function installPreload(options = {}) {
         const language=select('language',[['zh','简体中文'],['en','English']]);
         const theme=select('theme',[['cyan','极夜 · 青 / Midnight Cyan'],['violet','星云 · 紫 / Nebula Violet'],['light','冰川 · 白 / Glacier Light']]);
         const size=select('size',[['compact','紧凑 / Compact'],['normal','标准 / Standard'],['large','大字 / Large']]);
-        const preview=()=>{prefs={language:language.value,theme:theme.value,size:size.value};applyPrefs();};language.onchange=theme.onchange=size.onchange=preview;
+        const preview=()=>{prefs={language:language.value,theme:theme.value,size:size.value,translationTarget:translationTarget.value};applyPrefs();};language.onchange=theme.onchange=size.onchange=preview;
         make('b','本地离线翻译 / Offline translation',form);
         make('small','中英文互译 · 无需密钥 · 无按量收费。模型随安装包提供，首次翻译可能需要几秒加载。',form);
         make('small','公开更新渠道：无需 GitHub 账号或令牌。只检查与下载 ChatBridge 安装包。',form);
@@ -239,21 +250,9 @@ function installPreload(options = {}) {
       make('button','复制译文 / Copy',form).onclick=async()=>{if(await invoke('copy',output.value,report))report.textContent='已复制，请核对后粘贴发送 / Copied';};
       make('button',words[prefs.language].close,form).onclick=()=>overlay.remove();
     };
-    if(wa||signalContent){
-      const group=make('div',null,controls);group.dataset.cbZoom='1';group.style.cssText='display:flex;gap:3px;align-items:center;flex-shrink:0;';controls.prepend(group);
-      const less=make('button','−',group),reset=make('button','100%',group),more=make('button','＋',group);
-      less.title='缩小聊天内容 · Ctrl+-';less.setAttribute('aria-label','缩小聊天内容');less.dataset.cbZoomOut='1';
-      more.title='放大聊天内容 · Ctrl++';more.setAttribute('aria-label','放大聊天内容');more.dataset.cbZoomIn='1';
-      reset.title='恢复 100% · Ctrl+0';reset.dataset.cbZoomReset='1';
-      for(const b of [less,reset,more])b.style.cssText='padding:5px 8px;min-width:30px;';
-      const display=value=>{if(!value||!Number.isInteger(value.percent))return;reset.textContent=value.percent+'%';less.disabled=value.percent<=value.min;more.disabled=value.percent>=value.max;};
-      const change=async action=>{const result=await invoke('chat-zoom',{action},status);if(result)display(result);};
-      less.onclick=()=>change('out');more.onclick=()=>change('in');reset.onclick=()=>change('reset');
-      if(ipc.on){ipc.on('chatbridge:zoom',(_e,value)=>display(value));ipc.on('chatbridge:zoom-error',(_e,message)=>{if(status)status.textContent=message;});}
-      call('chat-zoom').then(display).catch(()=>{});
-    }
     target=make('select',null,controls);target.setAttribute('aria-label','译文语言 / Translation language');make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';target.onchange=scan;
     if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
+    if(wa||signalContent)bar.remove();
     if(signalContent){
       let editorState={};
       document.addEventListener('focusin',event=>{const e=event.target;if(e?.isContentEditable||e?.matches?.('input,textarea'))editorState={tag:e.tagName,editable:e.isContentEditable,readOnly:Boolean(e.readOnly),disabled:Boolean(e.disabled),ariaDisabled:e.getAttribute('aria-disabled')};},true);
@@ -262,7 +261,7 @@ function installPreload(options = {}) {
     }
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
-    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:48px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 48px)!important;}';
+    layout.textContent=signalContent?'#app-container{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:100%!important;}':wa?'#app{height:100vh!important;margin-top:0!important;}':'#app-container{position:fixed!important;top:48px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 48px)!important;}';
     call('preferences').then(p=>{if(p&&['zh','en'].includes(p.language)){prefs=p;applyPrefs();}}).catch(()=>{});
     if(ipc.on)ipc.on('chatbridge:preferences',(_e,p)=>{prefs=p;applyPrefs();});
     applyPrefs();setInterval(scan,1000);

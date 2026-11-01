@@ -9,6 +9,7 @@ function fixture(whatsapp=false,html,translation,signalContent=false,initialOrde
   calls.push({method,value});
   if(method==='unread-state')return [];
   if(method==='account-order')return value||initialOrder;
+  if(method==='workspace-zoom'){if(value?.action)percent=value.action==='reset'?100:Math.max(50,Math.min(200,percent+(value.action==='in'?10:-10)));return {percent,min:50,max:200};}
   if(method==='chat-zoom'){if(value)percent=value.action==='reset'?100:Math.max(50,Math.min(200,percent+(value.action==='in'?10:-10)));return {percent,min:50,max:200};}
   if(method==='accounts')return [{id:'wa-one',name:'Work WA'},{id:'wa-two',name:'Personal WA'}];
   if(method==='signal-accounts')return {accounts:[{id:'default',name:'Signal Work'}],current:'default'};
@@ -105,8 +106,10 @@ test('sidebar drag clamps width, saves on release and supports reset and keyboar
 });
 
 
-test('chat toolbar zoom controls show percent and support enlarge, shrink and reset',async()=>{
- const f=fixture(false,undefined,undefined,true);try{await f.api.state.serial;await new Promise(r=>setImmediate(r));const d=f.dom.window.document,reset=d.querySelector('[data-cb-zoom-reset]');assert(reset);assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();assert.equal(reset.textContent,'110%');await d.querySelector('[data-cb-zoom-out]').onclick();assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();await reset.onclick();assert.equal(reset.textContent,'100%');assert.equal(d.querySelectorAll('[data-chatbridge-bar] input[type=checkbox]').length,0);}finally{await f.close();}
+test('zoom controls live in settings and target the selected account',async()=>{
+ const f=fixture();try{await new Promise(r=>setImmediate(r));const d=f.dom.window.document;await d.querySelector('[data-cb-account="whatsapp:wa-two"] button').onclick();await d.querySelector('[aria-label="Settings"]').onclick();
+  const reset=d.querySelector('[data-chatbridge-settings] [data-cb-zoom-reset]');assert(reset);assert.equal(d.querySelector('[data-cb-zoom-account]').value,'whatsapp:wa-two');assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();assert.equal(reset.textContent,'110%');await d.querySelector('[data-cb-zoom-out]').onclick();assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();await reset.onclick();assert.equal(reset.textContent,'100%');assert(f.calls.some(c=>c.method==='workspace-zoom'&&c.value.id==='wa-two'&&c.value.action==='in'));
+ }finally{await f.close();}
 });
 
 test('synthetic page shortcuts cannot access clipboard and ordinary typing remains native',async()=>{
@@ -121,14 +124,9 @@ test('synthetic page shortcuts cannot access clipboard and ordinary typing remai
  }finally{await f.close();}
 });
 
-test('Signal input diagnostics copy only control metadata, never message or draft text',async()=>{
- const f=fixture(false,undefined,undefined,true);try{
-  const d=f.dom.window.document,box=d.createElement('textarea');box.value='PRIVATE_DRAFT_DO_NOT_COPY';d.body.append(box);box.focus();
-  const button=[...d.querySelectorAll('button')].find(b=>b.textContent==='输入诊断');assert(button);await button.onclick();
-  const payload=f.calls.filter(c=>c.method==='copy').at(-1).value;assert(!payload.includes('PRIVATE_DRAFT_DO_NOT_COPY'));assert(!payload.includes('Hello from history'));assert.equal(JSON.parse(payload).editor.tag,'TEXTAREA');
- }finally{await f.close();}
+test('both chat pages have no toolbar and no reserved top strip while translation remains automatic',async()=>{
+ for(const [wa,signal] of [[true,false],[false,true]]){const f=fixture(wa,undefined,undefined,signal);try{await f.api.state.serial;const d=f.dom.window.document;assert.equal(d.querySelector('[data-chatbridge-bar]'),null);assert.equal(d.querySelector('[data-cb-zoom]'),null);assert(d.querySelector('[data-cb-shell]'));if(signal)assert.equal(requests(f).length,1);const styles=[...d.querySelectorAll('style')].map(e=>e.textContent).join('');assert(styles.includes(signal?'top:0!important':'margin-top:0!important'));}finally{await f.close();}}
 });
-
 
 test('account unread badges are scoped by platform, retain exact numbers and clear only on zero',async()=>{
  const f=fixture();try{await new Promise(r=>setImmediate(r));const d=f.dom.window.document;
