@@ -84,7 +84,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   };
   const attachZoom=(contents,platform,id)=>zoomBindings.set(contents.id,bindZoom(contents,value=>accountZoom(platform,id,value)));
   bindInput(window.webContents);
-  if(native)bindInput(native.defaultWebContents);
+  if(native)bindInput(native.defaultWebContents,undefined,{nativeEditing:true});
   attachZoom(native?.defaultWebContents||window.webContents,'signal',currentProfile);
   const updateTitle = () => window.setTitle?.(config.windowTitle || 'ChatBridge');
   updateTitle();

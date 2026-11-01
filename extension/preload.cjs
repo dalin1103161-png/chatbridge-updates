@@ -9,7 +9,7 @@ function installPreload(options = {}) {
   globalThis.__chatbridgeInstalled = true;
   const call = (method, value) => ipc.invoke('chatbridge:invoke', method, value);
   // Bind editing to this renderer, rather than Signal's original top-level menu.
-  document.addEventListener('keydown',event=>{
+  if(!signalContent)document.addEventListener('keydown',event=>{
     if(!event.isTrusted||(!event.ctrlKey&&!event.metaKey)||event.altKey||event.isComposing)return;
     const key=event.key.toLowerCase();
     const command=event.shiftKey?(key==='v'?'pasteAndMatchStyle':key==='z'?'redo':null):({c:'copy',v:'paste',x:'cut',a:'selectAll',z:'undo',y:'redo'}[key]);

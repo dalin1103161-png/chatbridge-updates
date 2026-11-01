@@ -19,12 +19,22 @@ public static class ChatBridgeWindows {
  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
  [StructLayout(LayoutKind.Sequential)] public struct MSG { public IntPtr hwnd; public uint message; public UIntPtr wParam; public IntPtr lParam; public uint time; public int x; public int y; public uint reserved; }
  [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG message, IntPtr h, uint min, uint max, uint flags);
- public static bool FocusHost(long window, uint expectedPid, uint[] allowedPids) {
+ [StructLayout(LayoutKind.Sequential)] public struct GUIINFO { public uint size; public uint flags; public IntPtr active,focus,capture,menuOwner,moveSize,caret; public int left,top,right,bottom; }
+ [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUIINFO info);
+ [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent, IntPtr child);
+ public static bool FocusHost(long window, uint expectedPid, uint[] allowedPids, bool preserveCurrentFocus) {
   var h=new IntPtr(window); uint pid; var target=GetWindowThreadProcessId(h,out pid);
   if(pid!=expectedPid || pid==0) throw new Exception("Focus process mismatch");
   MSG message; PeekMessage(out message,IntPtr.Zero,0,0,0);
   var current=GetCurrentThreadId(); uint foregroundPid; var foreground=GetWindowThreadProcessId(GetForegroundWindow(),out foregroundPid);
   if(foregroundPid!=expectedPid && Array.IndexOf(allowedPids,foregroundPid)<0)return false;
+  if(preserveCurrentFocus) {
+   var info=new GUIINFO();info.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
+   if(GetGUIThreadInfo(target,ref info)) {
+    uint focusPid;GetWindowThreadProcessId(info.focus,out focusPid);
+    if(focusPid==expectedPid && (info.focus==h || IsChild(h,info.focus)))return true;
+   }
+  }
   bool toTarget=false,toForeground=false;
   try {
    if(current!=target) toTarget=AttachThreadInput(current,target,true);
@@ -55,7 +65,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
  try {
   $c=$line | ConvertFrom-Json
   if ($c.focusHost) {
-   $focused = [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid,[uint32[]]$c.allowedPids)
+   $focused = [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid,[uint32[]]$c.allowedPids,[bool]$c.preserveCurrentFocus)
    [Console]::Out.WriteLine((@{id=$c.id;ok=$focused}|ConvertTo-Json -Compress))
    continue
   }

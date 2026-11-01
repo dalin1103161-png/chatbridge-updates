@@ -6,10 +6,10 @@ function edit(contents,command){
  if(contents.isDestroyed?.())throw Error('聊天窗口已关闭。');
  contents[command]();return true;
 }
-function bindInput(contents,owner){
+function bindInput(contents,owner,{nativeEditing=false}={}){
  // The host menu belongs to another BrowserWindow; let the actual page own its keys.
  contents.setIgnoreMenuShortcuts?.(true);
- contents.on('before-input-event',(event,input)=>{
+ if(!nativeEditing)contents.on('before-input-event',(event,input)=>{
   if(input.type!=='keyDown'||(!input.control&&!input.meta)||input.alt||input.isComposing)return;
   const key=input.key.toLowerCase();
   const command=input.shift?(key==='v'?'pasteAndMatchStyle':key==='z'?'redo':null):({c:'copy',v:'paste',x:'cut',a:'selectAll',z:'undo',y:'redo'}[key]);

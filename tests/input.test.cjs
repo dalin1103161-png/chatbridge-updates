@@ -11,3 +11,7 @@ test('mouse focus belongs to the clicked renderer without swallowing typing',()=
  page.emit('before-mouse-event',{}, {type:'mouseDown'});page.emit('before-mouse-event',{}, {type:'mouseMove'});
  assert.equal(focus,1);assert.equal(ignore,true);let prevented=false;page.copy=()=>focus+=10;page.emit('before-input-event',{preventDefault:()=>prevented=true},{type:'keyDown',key:'c',control:true});assert(prevented);assert.equal(focus,11);prevented=false;page.emit('before-input-event',{preventDefault:()=>prevented=true},{type:'keyDown',key:'Enter'});assert(!prevented);
 });
+
+test('Signal keeps native editor keys without rerouting copy and paste through the main process',()=>{
+ const page=new EventEmitter();page.setIgnoreMenuShortcuts=()=>{};page.focus=()=>{};bindInput(page,undefined,{nativeEditing:true});assert.equal(page.listenerCount('before-input-event'),0);
+});

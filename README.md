@@ -99,3 +99,6 @@ WhatsApp 和 Signal 聊天工具栏增加“− / 百分比 / ＋”。范围 50
 
 ### Embedded keyboard input
 Chat pages claim keyboard focus on activation and mouse down. Editing shortcuts are bound to the focused renderer and invoke only its native edit commands; they do not use the original Signal window's menu target. Enter and ordinary typing remain native to WhatsApp/Signal. Windows isolated fixture checks type, Ctrl+A/C/V and Enter via OS SendKeys in embedded Signal processes and a WebContentsView.
+
+### Signal account reactivation
+Signal preserves native editor keyboard handling. On account reactivation the workspace restores Windows keyboard focus to the selected Signal process; late hide acknowledgments from another account cannot leave focus on a hidden child. An activation revision discards obsolete completion callbacks. Already-correct native focus is preserved to avoid resetting held modifier keys. Windows fixtures repeatedly revisit each existing Signal process and repeat copy/paste in text and editable controls.
