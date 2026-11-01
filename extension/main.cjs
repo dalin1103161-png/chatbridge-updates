@@ -56,6 +56,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const allowed = new Set([window.webContents.id]);
   if(native)allowed.add(native.defaultWebContents.id);
   let activeId = null;
+  window.on('chatbridge:chat-hidden',()=>{if(activeId!==null)views.get(activeId)?.webContents.focus?.();});
   const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
   const warmupTimer=setTimeout(()=>{if(translator.warmup)translator.warmup().catch(()=>{});},1500);warmupTimer.unref();
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
@@ -130,6 +131,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
           toast.on('click', () => { window.show?.(); window.focus?.(); openWhatsApp(account); }); toast.show();
         }
       });
+      view.webContents.on('did-finish-load',()=>{if(activeId===account.id)view.webContents.focus();});
       view.webContents.loadURL('https://web.whatsapp.com/');
     }
     show(account.id);
