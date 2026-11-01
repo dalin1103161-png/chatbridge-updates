@@ -9,5 +9,5 @@ test('editing targets the requesting page and rejects arbitrary native methods',
 test('mouse focus belongs to the clicked renderer without swallowing typing',()=>{
  const page=new EventEmitter();let focus=0,ignore;page.focus=()=>focus++;page.setIgnoreMenuShortcuts=x=>ignore=x;bindInput(page);
  page.emit('before-mouse-event',{}, {type:'mouseDown'});page.emit('before-mouse-event',{}, {type:'mouseMove'});
- assert.equal(focus,1);assert.equal(ignore,true);assert.equal(page.listenerCount('before-input-event'),0);
+ assert.equal(focus,1);assert.equal(ignore,true);let prevented=false;page.copy=()=>focus+=10;page.emit('before-input-event',{preventDefault:()=>prevented=true},{type:'keyDown',key:'c',control:true});assert(prevented);assert.equal(focus,11);prevented=false;page.emit('before-input-event',{preventDefault:()=>prevented=true},{type:'keyDown',key:'Enter'});assert(!prevented);
 });
