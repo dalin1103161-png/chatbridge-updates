@@ -6,7 +6,7 @@ function edit(contents,command){
  if(contents.isDestroyed?.())throw Error('聊天窗口已关闭。');
  contents[command]();return true;
 }
-function bindInput(contents){
+function bindInput(contents,owner){
  // The host menu belongs to another BrowserWindow; let the actual page own its keys.
  contents.setIgnoreMenuShortcuts?.(true);
  contents.on('before-input-event',(event,input)=>{
@@ -18,7 +18,7 @@ function bindInput(contents){
  });
 
  contents.on('before-mouse-event',(_event,input)=>{
-  if(input.type==='mouseDown')contents.focus();
+  if(input.type==='mouseDown'){owner?.focus();contents.focus();}
  });
 }
 module.exports={bindInput,edit};

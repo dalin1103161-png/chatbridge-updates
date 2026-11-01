@@ -56,7 +56,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const allowed = new Set([window.webContents.id]);
   if(native)allowed.add(native.defaultWebContents.id);
   let activeId = null;
-  window.on('chatbridge:chat-hidden',()=>{if(activeId!==null)views.get(activeId)?.webContents.focus?.();});
+  const focusWhatsApp=id=>{const view=views.get(id);if(view){window.focus?.();view.webContents.focus?.();}};
+  window.on('chatbridge:chat-hidden',()=>{if(activeId!==null)focusWhatsApp(activeId);});
   const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
   const warmupTimer=setTimeout(()=>{if(translator.warmup)translator.warmup().catch(()=>{});},1500);warmupTimer.unref();
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
@@ -99,7 +100,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     for (const [mid, view] of views) view.setVisible(mid === id);
     window.webContents.send('chatbridge:active', id);
     bounds();
-    if(id!==null)views.get(id)?.webContents.focus?.();
+    if(id!==null)focusWhatsApp(id);
   }
   function openWhatsApp(account) {
     if (!views.has(account.id)) {
@@ -111,7 +112,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       } });
       views.set(account.id, view);
       allowed.add(view.webContents.id);
-      bindInput(view.webContents);
+      bindInput(view.webContents,window);
       attachZoom(view.webContents,'whatsapp',account.id);
       window.contentView.addChildView(view);
       view.setVisible(false);
@@ -131,7 +132,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
           toast.on('click', () => { window.show?.(); window.focus?.(); openWhatsApp(account); }); toast.show();
         }
       });
-      view.webContents.on('did-finish-load',()=>{if(activeId===account.id)view.webContents.focus();});
+      view.webContents.on('did-finish-load',()=>{if(activeId===account.id)focusWhatsApp(account.id);});
       view.webContents.loadURL('https://web.whatsapp.com/');
     }
     show(account.id);
