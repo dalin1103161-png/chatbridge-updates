@@ -9,9 +9,11 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  host.loadFile(path.join(rootDir,'chatbridge/shell.html'));
  const pipe='\\\\.\\pipe\\chatbridge-'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex');
  const windows=new Map(),children=new Map(),pending=new Map();let sidebarWidth=144,active=null,sequence=0,ready=false,closed=false,suspended=false,focusRevision=0;
+ const focusTrace=[];let keyEvents=0,lastKeyAt=0;signalWindow.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();}});
  let rpc=async()=>{throw Error('Workspace is initializing');};
  const worker=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(rootDir,'chatbridge/native-window.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  const report=state=>{if(!host.isDestroyed())host.webContents.send('chatbridge:workspace-status',state);};
+ signalWindow.webContents.on('before-mouse-event',(_event,input)=>{if(input.type==='mouseDown'&&active==='default'&&!suspended)setImmediate(requestSignalFocus);});
  signalWindow.webContents.on('did-fail-load',(_e,code,description)=>report({error:'Signal 页面加载失败：'+code+' '+description}));
  signalWindow.webContents.on('render-process-gone',(_e,details)=>report({error:'Signal 页面进程退出：'+details.reason}));
  const error=message=>{if(!host.isDestroyed())host.webContents.send('chatbridge:launch-error',message);};
@@ -40,9 +42,10 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const server=net.createServer(socket=>{clients.add(socket);socket.once('close',()=>clients.delete(socket));let authenticated=false,profile='';const lines=readline.createInterface({input:socket});
   lines.on('line',async line=>{if(line.length>50000){socket.destroy();return;}try{const m=JSON.parse(line);
    if(!authenticated){const child=children.get(m.profile);if(m.token!==token||!child||child.pid!==m.pid||!/^\d+$/.test(m.hwnd)){socket.destroy();return;}authenticated=true;profile=m.profile;socket.chatbridgeProfile=profile;attach(profile,m.hwnd,m.pid);return;}
+   if(m.focusRequested){if(profile===active&&!suspended)requestSignalFocus();return;}
    if(m.hidden){host.emit('chatbridge:chat-hidden');requestSignalFocus();return;}
    if(m.shown){const record=windows.get(profile);if(record)command(record);return;}
-   if(!['translate','copy','preferences','chat-zoom'].includes(m.method))throw Error('Unsupported child request');
+   if(!['translate','copy','preferences','chat-zoom','input-diagnostics'].includes(m.method))throw Error('Unsupported child request');
    const result=await rpc(m.method,m.value,profile);if(!socket.destroyed)socket.write(JSON.stringify({id:m.id,result})+'\n');
   }catch(e){let id=0;try{id=JSON.parse(line).id;}catch{}if(authenticated&&!socket.destroyed)socket.write(JSON.stringify({id,error:e.message})+'\n');}});
   socket.on('error',()=>{});socket.on('close',()=>{if(profile){windows.delete(profile);children.delete(profile);}});
@@ -70,7 +73,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(quit)app.quit();
   })();return stopping;
  };
- const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence;const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
+ const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence,started=Date.now();const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);focusTrace.push({time:Date.now(),elapsedMs:Date.now()-started,verified:m.ok===true,targetClass:m.targetClass||'',focusClass:m.focusClass||'',preserved:m.preserved===true});if(focusTrace.length>12)focusTrace.shift();resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
  function requestSignalFocus(){
   const revision=++focusRevision,id=active;
   queueMicrotask(async()=>{
@@ -81,7 +84,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    else {const client=[...clients].find(c=>c.chatbridgeProfile===id);if(client&&!client.destroyed)client.write(JSON.stringify({focus:true})+'\n');}
   });
  }
- const controller={host,shutdown,focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
+ const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   async open(id){active=id;if(id==='default'||windows.has(id)){layout();requestSignalFocus();return;}await listening;
    if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
     const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}
@@ -94,9 +97,10 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
 function installManagedSignal(window,electron){
  const {ipcMain,app}=electron;bindInput(window.webContents,undefined,{nativeEditing:true});window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
  const originalShow=window.show.bind(window),originalHide=window.hide.bind(window);window.webContents.setBackgroundThrottling(false);
- let electronVisible=false;
+ let electronVisible=false,keyEvents=0,lastKeyAt=0;window.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();}});
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);
  const connected=new Promise((resolve,reject)=>{socket.once('connect',()=>{socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n');resolve();});socket.once('error',reject);socket.once('close',()=>reject(Error('账号连接已关闭。')));});connected.catch(()=>{});
+ window.webContents.on('before-mouse-event',(_event,input)=>{if(input.type==='mouseDown')setImmediate(()=>{if(electronVisible&&socket.readyState==='open')socket.write(JSON.stringify({focusRequested:true})+'\n');});});
  window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
@@ -104,8 +108,9 @@ function installManagedSignal(window,electron){
  const request=(method,value)=>connected.then(()=>new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');}));
  const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value),{keepScale:true});
  ipcMain.handle('chatbridge:invoke',(event,method,value)=>{
-  if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom','edit'].includes(method))throw Error('Unsupported child request');
+  if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom','edit','input-diagnostics'].includes(method))throw Error('Unsupported child request');
   if(method==='edit')return edit(event.sender,value);
+  if(method==='input-diagnostics')return request(method).then(result=>({...result,keyEvents,lastKeyAt}));
   return method==='chat-zoom'?applyZoom(value):request(method,value);
  });
 }

@@ -143,6 +143,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const handleRequest = async (event, method, value) => {
     authorized(event);
     if(method==='edit')return edit(event.sender,value);
+    if(method==='input-diagnostics')return native?native.inputDiagnostics():{available:false};
     if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
       validTranslation(value);

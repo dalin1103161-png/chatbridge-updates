@@ -118,3 +118,11 @@ test('synthetic page shortcuts cannot access clipboard and ordinary typing remai
   }
  }finally{await f.close();}
 });
+
+test('Signal input diagnostics copy only control metadata, never message or draft text',async()=>{
+ const f=fixture(false,undefined,undefined,true);try{
+  const d=f.dom.window.document,box=d.createElement('textarea');box.value='PRIVATE_DRAFT_DO_NOT_COPY';d.body.append(box);box.focus();
+  const button=[...d.querySelectorAll('button')].find(b=>b.textContent==='输入诊断');assert(button);await button.onclick();
+  const payload=f.calls.filter(c=>c.method==='copy').at(-1).value;assert(!payload.includes('PRIVATE_DRAFT_DO_NOT_COPY'));assert(!payload.includes('Hello from history'));assert.equal(JSON.parse(payload).editor.tag,'TEXTAREA');
+ }finally{await f.close();}
+});

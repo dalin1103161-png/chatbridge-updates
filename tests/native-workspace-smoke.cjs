@@ -34,6 +34,7 @@ app.whenReady().then(async()=>{
    await controller.open('default');await wait(()=>w.isVisible());await require('./input-roundtrip.cjs')(w,{focus:false,mouse:true});
    console.log('SIGNAL_ACCOUNT_RESELECT_OS_KEYBOARD_PASS',round);
   }
+  assert(controller.inputDiagnostics().trace.some(r=>r.targetClass==='Chrome_RenderWidgetHostHWND'&&r.verified));console.log('SIGNAL_RENDER_WIDGET_FOCUS_PASS');
   controller.setSidebarWidth(104);await wait(()=>Math.abs(w.getContentSize()[0]-(controller.host.getContentSize()[0]-104))<=2);assert.equal(controller.snapshot().sidebarWidth,104);
   controller.hide();assert.equal(controller.snapshot().active,null);
   controller.close(b);assert(!controller.snapshot().windows.some(r=>r.id===b));

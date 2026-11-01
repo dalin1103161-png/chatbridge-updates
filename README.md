@@ -102,3 +102,6 @@ Chat pages claim keyboard focus on activation and mouse down. Editing shortcuts 
 
 ### Signal account reactivation
 Signal preserves native editor keyboard handling. On account reactivation the workspace restores Windows keyboard focus to the selected Signal process; late hide acknowledgments from another account cannot leave focus on a hidden child. An activation revision discards obsolete completion callbacks. Already-correct native focus is preserved to avoid resetting held modifier keys. Windows fixtures repeatedly revisit each existing Signal process and repeat copy/paste in text and editable controls.
+
+### Input target diagnostics
+Signal mouse-down restores native focus after Chromium's click handling to its visible, enabled Chrome_RenderWidgetHostHWND, rather than accepting the outer Chrome widget as an editor input target. The Signal toolbar can copy input diagnostics with app/runtime version, aggregate key-event counts, control editability flags, and a bounded native-focus trace. It never records message text, draft values, clipboard contents, contacts, or account names. OS mouse-click tests exercise this path before typing.

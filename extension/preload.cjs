@@ -228,6 +228,12 @@ function installPreload(options = {}) {
     }
     target=make('select',null,controls);target.setAttribute('aria-label','译文语言 / Translation language');make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';target.onchange=scan;
     if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
+    if(signalContent){
+      let editorState={};
+      document.addEventListener('focusin',event=>{const e=event.target;if(e?.isContentEditable||e?.matches?.('input,textarea'))editorState={tag:e.tagName,editable:e.isContentEditable,readOnly:Boolean(e.readOnly),disabled:Boolean(e.disabled),ariaDisabled:e.getAttribute('aria-disabled')};},true);
+      const diagnostic=make('button','输入诊断',controls);diagnostic.title='复制输入诊断，不包含聊天内容';
+      diagnostic.onclick=async()=>{const old=diagnostic.textContent;try{await new Promise(r=>setTimeout(r,100));const data=await call('input-diagnostics');await call('copy',JSON.stringify({...data,editor:editorState}));diagnostic.textContent='诊断已复制';}catch{diagnostic.textContent='复制诊断失败';}setTimeout(()=>diagnostic.textContent=old,2000);};
+    }
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
     layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 108px)!important;}';

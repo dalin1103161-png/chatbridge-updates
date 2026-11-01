@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class ChatBridgeWindows {
  [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr h);
  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SetParent(IntPtr child, IntPtr parent);
@@ -22,29 +23,50 @@ public static class ChatBridgeWindows {
  [StructLayout(LayoutKind.Sequential)] public struct GUIINFO { public uint size; public uint flags; public IntPtr active,focus,capture,menuOwner,moveSize,caret; public int left,top,right,bottom; }
  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUIINFO info);
  [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent, IntPtr child);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder name, int length);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+ [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+ public delegate bool EnumChildProc(IntPtr h, IntPtr param);
+ [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumChildProc callback, IntPtr param);
+ static IntPtr SignalInputTarget(IntPtr window, uint pid) {
+  IntPtr result=IntPtr.Zero;
+  EnumChildWindows(window,(h,param)=>{uint childPid;GetWindowThreadProcessId(h,out childPid);var name=new StringBuilder(128);GetClassName(h,name,name.Capacity);if(childPid==pid && IsWindowVisible(h) && IsWindowEnabled(h) && name.ToString()=="Chrome_RenderWidgetHostHWND"){result=h;return false;}return true;},IntPtr.Zero);
+  return result;
+ }
+ public static string LastTargetClass="";
+ public static string LastFocusClass="";
+ public static bool LastPreserved=false;
+ static string ClassName(IntPtr h){var s=new StringBuilder(128);GetClassName(h,s,s.Capacity);return s.ToString();}
  public static bool FocusHost(long window, uint expectedPid, uint[] allowedPids, bool preserveCurrentFocus) {
+  LastTargetClass="";LastFocusClass="";LastPreserved=false;
   var h=new IntPtr(window); uint pid; var target=GetWindowThreadProcessId(h,out pid);
   if(pid!=expectedPid || pid==0) throw new Exception("Focus process mismatch");
   MSG message; PeekMessage(out message,IntPtr.Zero,0,0,0);
   var current=GetCurrentThreadId(); uint foregroundPid; var foreground=GetWindowThreadProcessId(GetForegroundWindow(),out foregroundPid);
   if(foregroundPid!=expectedPid && Array.IndexOf(allowedPids,foregroundPid)<0)return false;
+  var input=preserveCurrentFocus?SignalInputTarget(h,expectedPid):h;
+  LastTargetClass=ClassName(input);
+  if(input==IntPtr.Zero)return false;
   if(preserveCurrentFocus) {
    var info=new GUIINFO();info.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
    if(GetGUIThreadInfo(target,ref info)) {
     uint focusPid;GetWindowThreadProcessId(info.focus,out focusPid);
-    if(focusPid==expectedPid && (info.focus==h || IsChild(h,info.focus)))return true;
+    if(focusPid==expectedPid && (info.focus==input || IsChild(input,info.focus))){LastFocusClass=ClassName(info.focus);LastPreserved=true;return true;}
    }
   }
   bool toTarget=false,toForeground=false;
   try {
    if(current!=target) toTarget=AttachThreadInput(current,target,true);
    if(foreground!=0 && foreground!=target && foreground!=current) toForeground=AttachThreadInput(current,foreground,true);
-   SetForegroundWindow(h);SetActiveWindow(h);SetFocus(h);
+   var root=GetAncestor(h,2);if(root==IntPtr.Zero)root=h;SetForegroundWindow(root);SetActiveWindow(root);SetFocus(input);
   } finally {
    if(toForeground)AttachThreadInput(current,foreground,false);
    if(toTarget)AttachThreadInput(current,target,false);
   }
-  return true;
+  var verified=new GUIINFO();verified.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
+  var available=GetGUIThreadInfo(target,ref verified);LastFocusClass=ClassName(verified.focus);
+  return available && (verified.focus==input || IsChild(input,verified.focus));
  }
  public static void Apply(long child, long parent, uint expectedPid, int x, int y, int width, int height, bool visible, bool attach) {
   var c = new IntPtr(child); uint pid; GetWindowThreadProcessId(c, out pid);
@@ -66,7 +88,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
   $c=$line | ConvertFrom-Json
   if ($c.focusHost) {
    $focused = [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid,[uint32[]]$c.allowedPids,[bool]$c.preserveCurrentFocus)
-   [Console]::Out.WriteLine((@{id=$c.id;ok=$focused}|ConvertTo-Json -Compress))
+   [Console]::Out.WriteLine((@{id=$c.id;ok=$focused;targetClass=[ChatBridgeWindows]::LastTargetClass;focusClass=[ChatBridgeWindows]::LastFocusClass;preserved=[ChatBridgeWindows]::LastPreserved}|ConvertTo-Json -Compress))
    continue
   }
   [ChatBridgeWindows]::Apply([long]$c.child,[long]$c.parent,[uint32]$c.pid,[int]$c.x,[int]$c.y,[int]$c.width,[int]$c.height,[bool]$c.visible,[bool]$c.attach)
