@@ -23,12 +23,12 @@ jobs:
       - name: Require identical application sources
         shell: pwsh
         run: |
-          $changed = git diff --name-only ea2a38dbad32489873cce0071563d2e0d0ce721d HEAD -- extension prepare_source.py local_translate package.json package-lock.json
+          $changed = git diff --name-only d8a9fee343430ec69a82b96ad9b2642a25a5b332 HEAD -- extension prepare_source.py local_translate package.json package-lock.json
           if ($changed) { throw 'Application sources changed; rebuild before reusing an installer' }
       - uses: actions/download-artifact@v4
         with:
           name: ChatBridge-startup-test-installer
-          run-id: 41260369267
+          run-id: 41264151877
           github-token: ${{ github.token }}
           path: existing-installer
       - name: Extract the existing application without modifying account data

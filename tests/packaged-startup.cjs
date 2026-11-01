@@ -47,12 +47,15 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    const initial=await zoom();console.log('PACKAGED_ZOOM_INITIAL',initial);
    if(initial!==(process.env.CHATBRIDGE_STARTUP_LABEL==='second-launch'?110:100))throw Error('Saved chat zoom did not restore');
    const hostBefore=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
-   const restoredDpr=await evaluate('devicePixelRatio');if(Math.abs(restoredDpr/JSON.parse(hostBefore.result.value).dpr-initial/100)>0.03)throw Error('Saved zoom label did not match the rendered scale');
-   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);const baseDpr=await evaluate('devicePixelRatio');
-   await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);let zoomDpr=await evaluate('devicePixelRatio');const dprDeadline=Date.now()+5000;while(Math.abs(zoomDpr/baseDpr-1.1)>0.03&&Date.now()<dprDeadline){await delay(100);zoomDpr=await evaluate('devicePixelRatio');}console.log('PACKAGED_ZOOM_DPR',JSON.stringify({baseDpr,zoomDpr,percent:await zoom()}));if(Math.abs(zoomDpr/baseDpr-1.1)>0.03)throw Error('Content did not enlarge: '+JSON.stringify({baseDpr,zoomDpr}));
-   await evaluate(`document.querySelector('[data-cb-zoom-out]').click()`);await waitZoom(100);
+   const hostDpr=JSON.parse(hostBefore.result.value).dpr;
+   const waitRendered=async percent=>{const deadline=Date.now()+5000;let dpr;do{dpr=await evaluate('devicePixelRatio');if(Math.abs(dpr/hostDpr-percent/100)<=0.03)return dpr;await delay(100);}while(Date.now()<deadline);throw Error('Rendered zoom did not reach '+percent+': '+dpr);};
+   const restoredDpr=await waitRendered(initial);console.log('PACKAGED_RESTORED_ZOOM_DPR',restoredDpr);
+
+   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);const baseDpr=await waitRendered(100);
+   await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);let zoomDpr=await waitRendered(110);const dprDeadline=Date.now()+5000;while(Math.abs(zoomDpr/baseDpr-1.1)>0.03&&Date.now()<dprDeadline){await delay(100);zoomDpr=await evaluate('devicePixelRatio');}console.log('PACKAGED_ZOOM_DPR',JSON.stringify({baseDpr,zoomDpr,percent:await zoom()}));if(Math.abs(zoomDpr/baseDpr-1.1)>0.03)throw Error('Content did not enlarge: '+JSON.stringify({baseDpr,zoomDpr}));
+   await evaluate(`document.querySelector('[data-cb-zoom-out]').click()`);await waitZoom(100);await waitRendered(100);
    // CDP key injection bypasses Electron before-input-event; native shortcut wiring is covered in zoom.test.cjs.
-   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);
+   await evaluate(`document.querySelector('[data-cb-zoom-reset]').click()`);await waitZoom(100);await evaluate(`document.querySelector('[data-cb-zoom-in]').click()`);await waitZoom(110);await waitRendered(110);
    const hostAfter=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
    if(hostAfter.result.value!==hostBefore.result.value)throw Error('Chat zoom changed the outer workspace');
    console.log('PACKAGED_CHAT_ZOOM_PASS: buttons, persisted scale and independent workspace scale');
