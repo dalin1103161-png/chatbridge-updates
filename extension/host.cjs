@@ -73,7 +73,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(quit)app.quit();
   })();return stopping;
  };
- const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence,started=Date.now();const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);focusTrace.push({time:Date.now(),elapsedMs:Date.now()-started,verified:m.ok===true,targetClass:m.targetClass||'',focusClass:m.focusClass||'',preserved:m.preserved===true});if(focusTrace.length>12)focusTrace.shift();resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
+ const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence,started=Date.now();const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);focusTrace.push({time:Date.now(),elapsedMs:Date.now()-started,verified:m.ok===true,targetClass:m.targetClass||'',focusClass:m.focusClass||'',preserved:m.preserved===true,reason:m.reason||''});if(focusTrace.length>12)focusTrace.shift();resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
  function requestSignalFocus(){
   const revision=++focusRevision,id=active;
   queueMicrotask(async()=>{
