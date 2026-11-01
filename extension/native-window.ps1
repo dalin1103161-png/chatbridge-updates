@@ -19,11 +19,12 @@ public static class ChatBridgeWindows {
  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
  [StructLayout(LayoutKind.Sequential)] public struct MSG { public IntPtr hwnd; public uint message; public UIntPtr wParam; public IntPtr lParam; public uint time; public int x; public int y; public uint reserved; }
  [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG message, IntPtr h, uint min, uint max, uint flags);
- public static void FocusHost(long window, uint expectedPid) {
+ public static bool FocusHost(long window, uint expectedPid, uint[] allowedPids) {
   var h=new IntPtr(window); uint pid; var target=GetWindowThreadProcessId(h,out pid);
   if(pid!=expectedPid || pid==0) throw new Exception("Focus process mismatch");
   MSG message; PeekMessage(out message,IntPtr.Zero,0,0,0);
   var current=GetCurrentThreadId(); uint foregroundPid; var foreground=GetWindowThreadProcessId(GetForegroundWindow(),out foregroundPid);
+  if(foregroundPid!=expectedPid && Array.IndexOf(allowedPids,foregroundPid)<0)return false;
   bool toTarget=false,toForeground=false;
   try {
    if(current!=target) toTarget=AttachThreadInput(current,target,true);
@@ -33,6 +34,7 @@ public static class ChatBridgeWindows {
    if(toForeground)AttachThreadInput(current,foreground,false);
    if(toTarget)AttachThreadInput(current,target,false);
   }
+  return true;
  }
  public static void Apply(long child, long parent, uint expectedPid, int x, int y, int width, int height, bool visible, bool attach) {
   var c = new IntPtr(child); uint pid; GetWindowThreadProcessId(c, out pid);
@@ -53,8 +55,8 @@ while ($null -ne ($line=[Console]::ReadLine())) {
  try {
   $c=$line | ConvertFrom-Json
   if ($c.focusHost) {
-   [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid)
-   [Console]::Out.WriteLine((@{id=$c.id;ok=$true}|ConvertTo-Json -Compress))
+   $focused = [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid,[uint32[]]$c.allowedPids)
+   [Console]::Out.WriteLine((@{id=$c.id;ok=$focused}|ConvertTo-Json -Compress))
    continue
   }
   [ChatBridgeWindows]::Apply([long]$c.child,[long]$c.parent,[uint32]$c.pid,[int]$c.x,[int]$c.y,[int]$c.width,[int]$c.height,[bool]$c.visible,[bool]$c.attach)
