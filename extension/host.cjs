@@ -9,7 +9,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  host.loadFile(path.join(rootDir,'chatbridge/shell.html'));
  const pipe='\\\\.\\pipe\\chatbridge-'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex');
  const windows=new Map(),children=new Map(),pending=new Map();let sidebarWidth=144,active=null,sequence=0,ready=false,closed=false,suspended=false,focusRevision=0;
- const focusTrace=[];let keyEvents=0,lastKeyAt=0;signalWindow.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();}});
+ const focusTrace=[];let keyEvents=0,lastKeyAt=0,lastModifiers={};signalWindow.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();lastModifiers={control:input.control===true,shift:input.shift===true,alt:input.alt===true,meta:input.meta===true};}});
  let rpc=async()=>{throw Error('Workspace is initializing');};
  const worker=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(rootDir,'chatbridge/native-window.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  const report=state=>{if(!host.isDestroyed())host.webContents.send('chatbridge:workspace-status',state);};
@@ -35,7 +35,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const attach=(id,handle,pid)=>{windows.set(id,{id,hwnd:handle,pid,attached:false});layout();};
  const originalShow=signalWindow.show.bind(signalWindow),originalHide=signalWindow.hide.bind(signalWindow);
  signalWindow.webContents.setBackgroundThrottling(false);
- signalWindow.hide();signalWindow.setMenuBarVisibility(false);signalWindow.setSkipTaskbar(true);attach('default',hwnd(signalWindow),process.pid);
+ signalWindow.hide();signalWindow.setMenu(null);signalWindow.setMenuBarVisibility(false);signalWindow.setSkipTaskbar(true);attach('default',hwnd(signalWindow),process.pid);
  signalWindow.show=()=>layout();signalWindow.showInactive=()=>layout();
  signalWindow.on('show',layout);signalWindow.webContents.on('did-finish-load',layout);
  const clients=new Set();
@@ -73,7 +73,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(quit)app.quit();
   })();return stopping;
  };
- const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence,started=Date.now();const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);focusTrace.push({time:Date.now(),elapsedMs:Date.now()-started,verified:m.ok===true,targetClass:m.targetClass||'',focusClass:m.focusClass||'',preserved:m.preserved===true,reason:m.reason||''});if(focusTrace.length>12)focusTrace.shift();resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
+ const focusNative=(handle,pid,preserveCurrentFocus=false)=>{if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence,started=Date.now();const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);focusTrace.push({time:Date.now(),elapsedMs:Date.now()-started,verified:m.ok===true,targetClass:m.targetClass||'',focusClass:m.focusClass||'',preserved:m.preserved===true,reason:m.reason||'',menuMode:m.menuMode===true});if(focusTrace.length>12)focusTrace.shift();resolve(m.ok===true&&!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:handle,pid,preserveCurrentFocus,allowedPids:[process.pid,...[...children.values()].map(c=>c.pid)]})+'\n');});};
  function requestSignalFocus(){
   const revision=++focusRevision,id=active;
   queueMicrotask(async()=>{
@@ -83,7 +83,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    // Native render-widget focus must remain the final step after Chromium/React focus handling.
   });
  }
- const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
+ const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,lastModifiers,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   async open(id){active=id;if(id==='default'||windows.has(id)){layout();requestSignalFocus();return;}await listening;
    if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
     const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}
@@ -94,9 +94,9 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  return controller;
 }
 function installManagedSignal(window,electron){
- const {ipcMain,app}=electron;bindInput(window.webContents,undefined,{nativeEditing:true});window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
+ const {ipcMain,app}=electron;bindInput(window.webContents,undefined,{nativeEditing:true});window.setMenu(null);window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
  const originalShow=window.show.bind(window),originalHide=window.hide.bind(window);window.webContents.setBackgroundThrottling(false);
- let electronVisible=false,keyEvents=0,lastKeyAt=0;window.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();}});
+ let electronVisible=false,keyEvents=0,lastKeyAt=0,lastModifiers={};window.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();lastModifiers={control:input.control===true,shift:input.shift===true,alt:input.alt===true,meta:input.meta===true};}});
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);
  const connected=new Promise((resolve,reject)=>{socket.once('connect',()=>{socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n');resolve();});socket.once('error',reject);socket.once('close',()=>reject(Error('账号连接已关闭。')));});connected.catch(()=>{});
  window.webContents.on('before-mouse-event',(_event,input)=>{if(input.type==='mouseDown')setImmediate(()=>{if(electronVisible&&socket.readyState==='open')socket.write(JSON.stringify({focusRequested:true})+'\n');});});
@@ -109,7 +109,7 @@ function installManagedSignal(window,electron){
  ipcMain.handle('chatbridge:invoke',(event,method,value)=>{
   if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom','edit','input-diagnostics'].includes(method))throw Error('Unsupported child request');
   if(method==='edit')return edit(event.sender,value);
-  if(method==='input-diagnostics')return request(method).then(result=>({...result,keyEvents,lastKeyAt}));
+  if(method==='input-diagnostics')return request(method).then(result=>({...result,keyEvents,lastKeyAt,lastModifiers}));
   return method==='chat-zoom'?applyZoom(value):request(method,value);
  });
 }

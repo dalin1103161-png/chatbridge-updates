@@ -56,6 +56,8 @@ def prepare(destination, existing=False):
     replace_once(main, '  // Second, start checking for app updates\n',
                  '  // ChatBridge: own updater is not configured; do not replace this fork with official Signal.\n  if (app.getName() === \'ChatBridge\') return;\n\n  // Second, start checking for app updates\n')
     replace_once(main, 'async function forceUpdate() {', "async function forceUpdate() {\n  if (app.getName() === 'ChatBridge') return;")
+    replace_once(main, '  Menu.setApplicationMenu(menu);',
+                 "  Menu.setApplicationMenu(menu);\n  if (process.platform === 'win32' && app.getName() === 'ChatBridge') {\n    for (const window of BrowserWindow.getAllWindows()) window.setMenu(null);\n  }")
     profile = destination / 'app/user_config.main.ts'
     replace_once(profile, 'if (userData !== undefined) {',
                  "// Each Signal identity has a separate database and single-instance lock.\nconst chatbridgeProfile = process.env.CHATBRIDGE_SIGNAL_PROFILE || 'default';\nif (chatbridgeProfile !== 'default' && !/^[a-f0-9-]{36}$/.test(chatbridgeProfile)) throw new Error('Invalid ChatBridge profile');\nuserData = chatbridgeProfile === 'default' ? join(app.getPath('appData'), 'ChatBridgeSignal') : join(app.getPath('appData'), 'ChatBridgeSignalProfiles', chatbridgeProfile);\n\nif (userData !== undefined) {")

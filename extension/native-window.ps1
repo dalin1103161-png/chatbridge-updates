@@ -27,20 +27,20 @@ public static class ChatBridgeWindows {
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
- public delegate bool EnumChildProc(IntPtr h, IntPtr param);
- [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumChildProc callback, IntPtr param);
  static IntPtr SignalInputTarget(IntPtr window, uint pid) {
-  IntPtr result=IntPtr.Zero;
-  EnumChildWindows(window,(h,param)=>{uint childPid;GetWindowThreadProcessId(h,out childPid);var name=new StringBuilder(128);GetClassName(h,name,name.Capacity);if(childPid==pid && IsWindowVisible(h) && IsWindowEnabled(h) && name.ToString()=="Chrome_RenderWidgetHostHWND"){result=h;return false;}return true;},IntPtr.Zero);
-  return result;
+  uint ownerPid;var thread=GetWindowThreadProcessId(window,out ownerPid);var info=new GUIINFO();info.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
+  if(GetGUIThreadInfo(thread,ref info)){uint focusPid;GetWindowThreadProcessId(info.focus,out focusPid);if(focusPid==pid && (info.focus==window || IsChild(window,info.focus)) && IsWindowVisible(info.focus) && IsWindowEnabled(info.focus))return info.focus;}
+  return window;
  }
+ [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint msg,UIntPtr w,IntPtr l);
  public static string LastReason="";
  public static string LastTargetClass="";
  public static string LastFocusClass="";
  public static bool LastPreserved=false;
+ public static bool LastMenuMode=false;
  static string ClassName(IntPtr h){var s=new StringBuilder(128);GetClassName(h,s,s.Capacity);return s.ToString();}
  public static bool FocusHost(long window, uint expectedPid, uint[] allowedPids, bool preserveCurrentFocus) {
-  LastReason="starting";LastTargetClass="";LastFocusClass="";LastPreserved=false;
+  LastReason="starting";LastTargetClass="";LastFocusClass="";LastPreserved=false;LastMenuMode=false;
   var h=new IntPtr(window); uint pid; var target=GetWindowThreadProcessId(h,out pid);
   if(pid!=expectedPid || pid==0) throw new Exception("Focus process mismatch");
   MSG message; PeekMessage(out message,IntPtr.Zero,0,0,0);
@@ -53,14 +53,15 @@ public static class ChatBridgeWindows {
    var info=new GUIINFO();info.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
    if(GetGUIThreadInfo(target,ref info)) {
     uint focusPid;GetWindowThreadProcessId(info.focus,out focusPid);
-    if(focusPid==expectedPid && (info.focus==input || IsChild(input,info.focus))){LastFocusClass=ClassName(info.focus);LastPreserved=true;LastReason="already-focused";return true;}
+    LastMenuMode=(info.flags & 28)!=0;
+    if(!LastMenuMode && focusPid==expectedPid && (info.focus==input || IsChild(input,info.focus))){LastFocusClass=ClassName(info.focus);LastPreserved=true;LastReason="already-focused";return true;}
    }
   }
   bool toTarget=false,toForeground=false;
   try {
    if(current!=target) toTarget=AttachThreadInput(current,target,true);
    if(foreground!=0 && foreground!=target && foreground!=current) toForeground=AttachThreadInput(current,foreground,true);
-   var root=GetAncestor(h,2);if(root==IntPtr.Zero)root=h;SetForegroundWindow(root);SetActiveWindow(root);SetFocus(input);
+   var root=GetAncestor(h,2);if(root==IntPtr.Zero)root=h;if(LastMenuMode){PostMessage(root,31,UIntPtr.Zero,IntPtr.Zero);if(root!=h)PostMessage(h,31,UIntPtr.Zero,IntPtr.Zero);}SetForegroundWindow(root);SetActiveWindow(root);SetFocus(input);
   } finally {
    if(toForeground)AttachThreadInput(current,foreground,false);
    if(toTarget)AttachThreadInput(current,target,false);
@@ -89,7 +90,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
   $c=$line | ConvertFrom-Json
   if ($c.focusHost) {
    $focused = [ChatBridgeWindows]::FocusHost([long]$c.window,[uint32]$c.pid,[uint32[]]$c.allowedPids,[bool]$c.preserveCurrentFocus)
-   [Console]::Out.WriteLine((@{id=$c.id;ok=$focused;targetClass=[ChatBridgeWindows]::LastTargetClass;focusClass=[ChatBridgeWindows]::LastFocusClass;preserved=[ChatBridgeWindows]::LastPreserved;reason=[ChatBridgeWindows]::LastReason}|ConvertTo-Json -Compress))
+   [Console]::Out.WriteLine((@{id=$c.id;ok=$focused;targetClass=[ChatBridgeWindows]::LastTargetClass;focusClass=[ChatBridgeWindows]::LastFocusClass;preserved=[ChatBridgeWindows]::LastPreserved;reason=[ChatBridgeWindows]::LastReason;menuMode=[ChatBridgeWindows]::LastMenuMode}|ConvertTo-Json -Compress))
    continue
   }
   [ChatBridgeWindows]::Apply([long]$c.child,[long]$c.parent,[uint32]$c.pid,[int]$c.x,[int]$c.y,[int]$c.width,[int]$c.height,[bool]$c.visible,[bool]$c.attach)
