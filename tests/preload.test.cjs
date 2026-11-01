@@ -2,12 +2,13 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),{JSDOM}=require('jsdom');
 const {installPreload}=require('../extension/preload.cjs');
-function fixture(whatsapp=false,html,translation,signalContent=false){
+function fixture(whatsapp=false,html,translation,signalContent=false,initialOrder=[]){
  const dom=new JSDOM(html||'<!doctype html><body><div class="module-ConversationHeader__header__info__title">Friend</div><div data-message-id="old"><span class="module-message__text">Hello from history</span></div></body>',{url:'https://fixture.invalid'});
  const old={document:global.document,interval:global.setInterval,installed:global.__chatbridgeInstalled};global.document=dom.window.document;global.setInterval=()=>1;delete global.__chatbridgeInstalled;
  let percent=100;const calls=[],listeners=new Map();const ipc={on:(channel,callback)=>listeners.set(channel,callback),invoke:async(_channel,method,value)=>{
   calls.push({method,value});
   if(method==='unread-state')return [];
+  if(method==='account-order')return value||initialOrder;
   if(method==='chat-zoom'){if(value)percent=value.action==='reset'?100:Math.max(50,Math.min(200,percent+(value.action==='in'?10:-10)));return {percent,min:50,max:200};}
   if(method==='accounts')return [{id:'wa-one',name:'Work WA'},{id:'wa-two',name:'Personal WA'}];
   if(method==='signal-accounts')return {accounts:[{id:'default',name:'Signal Work'}],current:'default'};
@@ -145,4 +146,22 @@ test('account unread badges are scoped by platform, retain exact numbers and cle
 
 test('Signal message totals include all conversation messages rather than unread-chat counts',()=>{
  const {signalUnreadCount}=require('../extension/preload.cjs');assert.equal(signalUnreadCount({a:{unreadCount:3},b:{unreadCount:4,isArchived:true},c:{unreadCount:2,muteExpiresAt:9999999999},d:{}}),9);assert.equal(signalUnreadCount({}),0);assert.equal(signalUnreadCount(null),null);assert.equal(signalUnreadCount({a:{unreadCount:-1}}),null);
+});
+
+
+test('mixed platform accounts drag between rows, preserve badges and selection, and save one order',async()=>{
+ const initial=['whatsapp:wa-two','signal:default','whatsapp:wa-one'];
+ const f=fixture(false,undefined,undefined,false,initial);try{
+  await new Promise(r=>setImmediate(r));const d=f.dom.window.document,list=d.querySelector('[data-cb-account-list]');
+  const keys=()=>[...list.children].map(row=>row.dataset.cbAccount);assert.deepEqual(keys(),initial);
+  const row=list.lastElementChild;const event={target:row.querySelector('button'),dataTransfer:{setData(){}},preventDefault(){}};
+  f.emit('chatbridge:unread',{platform:'whatsapp',id:'wa-one',count:8,revision:1});
+  row.ondragstart(event);list.ondragover({...event,clientY:-1});assert.equal(list.firstElementChild,row);
+  list.ondrop(event);row.ondragend();await new Promise(r=>setImmediate(r));
+  assert.deepEqual(f.calls.filter(c=>c.method==='account-order'&&c.value).map(c=>c.value),[['whatsapp:wa-one','whatsapp:wa-two','signal:default']]);
+  assert.equal(row.querySelector('[data-cb-unread]').textContent,'8');assert(!f.calls.some(c=>['whatsapp','open-signal'].includes(c.method)));
+  await row.querySelector('button').onclick();assert.deepEqual(keys(),['whatsapp:wa-one','whatsapp:wa-two','signal:default']);
+  const last=list.lastElementChild;last.ondragstart({...event,target:last});list.ondragover({...event,clientY:-1});last.ondragend();assert.deepEqual(keys(),['whatsapp:wa-one','whatsapp:wa-two','signal:default']);
+  assert.equal(f.calls.filter(c=>c.method==='account-order'&&c.value).length,1);
+ }finally{await f.close();}
 });

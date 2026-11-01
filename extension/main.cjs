@@ -96,7 +96,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   window.on('chatbridge:signal-unread',reportSignalUnread);
   const bounds = () => {
     const [width, height] = window.getContentSize();
-    for (const view of views.values()) view.setBounds({ x: sidebarWidth, y: 108, width: Math.max(1, width - sidebarWidth), height: Math.max(1, height - 108) });
+    for (const view of views.values()) view.setBounds({ x: sidebarWidth, y: 48, width: Math.max(1, width - sidebarWidth), height: Math.max(1, height - 48) });
   };
   function show(id) {
     activeId = id;
@@ -182,6 +182,13 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if (method === 'accounts') return config.accounts;
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='account-order'){
+      const keys=[...signalAccounts().map(a=>'signal:'+a.id),...config.accounts.map(a=>'whatsapp:'+a.id)];
+      const current=[...new Set([...(Array.isArray(config.accountOrder)?config.accountOrder:[]).filter(key=>keys.includes(key)),...keys])];
+      if(value===undefined)return current;
+      if(!Array.isArray(value)||value.length!==keys.length||new Set(value).size!==keys.length||value.some(key=>!keys.includes(key)))throw Error('账号排序无效，请刷新账号列表后重试。');
+      config.accountOrder=value.slice();save();return config.accountOrder;
+    }
     if(method==='sidebar-width'){
       if(value===undefined)return {width:sidebarWidth};
       if(!value||!Number.isInteger(value.width)||value.width<88||value.width>320||typeof value.persist!=='boolean')throw new Error('侧栏宽度无效。');
@@ -271,3 +278,4 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   return { show, views };
 }
 module.exports = { installChatBridge, validTranslation };
+

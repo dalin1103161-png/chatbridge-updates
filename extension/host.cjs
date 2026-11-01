@@ -22,7 +22,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  worker.stdin.on('error',()=>{});
  worker.on('error',e=>error('内嵌窗口控制器启动失败：'+e.message));worker.stderr.on('data',()=>{});
  const command=record=>{if(!ready||closed)return;const [width,height]=host.getContentSize();const scale=screen.getDisplayMatching(host.getBounds()).scaleFactor;
-  const id=++sequence;worker.stdin.write(JSON.stringify({id,parent:hwnd(host),child:record.hwnd,pid:record.pid,x:Math.round(sidebarWidth*scale),y:Math.round(108*scale),width:Math.round(Math.max(1,width-sidebarWidth)*scale),height:Math.round(Math.max(1,height-108)*scale),visible:record.id===active&&!suspended,attach:!record.attached})+'\n');pending.set(id,record);};
+  const id=++sequence;worker.stdin.write(JSON.stringify({id,parent:hwnd(host),child:record.hwnd,pid:record.pid,x:Math.round(sidebarWidth*scale),y:Math.round(48*scale),width:Math.round(Math.max(1,width-sidebarWidth)*scale),height:Math.round(Math.max(1,height-48)*scale),visible:record.id===active&&!suspended,attach:!record.attached})+'\n');pending.set(id,record);};
  readline.createInterface({input:worker.stdout}).on('line',line=>{try{const m=JSON.parse(line);if(m.ready){ready=true;for(const r of windows.values())command(r);return;}const r=pending.get(m.id);pending.delete(m.id);if(r?.complete){r.complete(m);return;}if(m.error)error('Signal 内嵌失败：'+m.error);else if(r){r.attached=true;r.actualParent=m.parent;applyElectronVisibility(r);}}catch{}});
  const layout=()=>{for(const r of windows.values())command(r);};
  for(const event of ['resize','move','show','restore'])host.on(event,layout);
@@ -121,3 +121,4 @@ function installManagedSignal(window,electron){
  });
 }
 module.exports={createNativeWorkspace,installManagedSignal};
+

@@ -20,6 +20,9 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
      if(!homeClient)homeClient=await cdp(home.webSocketDebuggerUrl);
      const h=await homeClient.call('Runtime.evaluate',{expression:`!!document.querySelector('[data-chatbridge-home]')&&document.body.innerText.includes('各位销冠都开大单')&&!!document.querySelector('[data-cb-account="signal:default"] > button')`,returnByValue:true});
      if(h.result.value){
+      const header=await homeClient.call('Runtime.evaluate',{expression:`(()=>{const bar=document.querySelector('[data-chatbridge-bar]').getBoundingClientRect(),actions=document.querySelector('[data-cb-workspace-actions]').getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();return {top:bar.top,bottom:bar.bottom,actionsTop:actions.top,actionsBottom:actions.bottom,mainTop:main.top};})()`,returnByValue:true});
+      const rect=header.result.value;if(rect.top!==0||rect.bottom!==48||rect.actionsTop<0||rect.actionsBottom>48||rect.mainTop!==48)throw Error('Workspace header does not fit the compact top area: '+JSON.stringify(rect));
+      console.log('PACKAGED_COMPACT_WORKSPACE_HEADER_PASS');
       const size=await homeClient.call('Runtime.evaluate',{expression:`Number(document.querySelector('[data-cb-resizer]').getAttribute('aria-valuenow'))`,returnByValue:true});
       const initial=size.result.value,targetWidth=initial<120?168:108;
       await homeClient.call('Input.dispatchMouseEvent',{type:'mousePressed',x:initial-4,y:250,button:'left',buttons:1,clickCount:1});
@@ -68,3 +71,4 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
  }finally{homeClient?.close();if(client){await client.call('Browser.close').catch(()=>{});client.close();}await delay(1000);if(app.exitCode===null)app.kill();outputLog.end();
  const logDir=path.join(process.env.APPDATA||'','ChatBridgeSignal','logs');if(fs.existsSync(logDir))for(const name of fs.readdirSync(logDir).filter(n=>n.endsWith('.log')))fs.copyFileSync(path.join(logDir,name),path.join(output,'signal-'+name));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
+

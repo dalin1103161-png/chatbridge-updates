@@ -8,8 +8,8 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { installChatBridge, validTranslation } = require('../extension/main.cjs');
 
-function fixture() {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'chatbridge-'));
+function fixture(existingTemp) {
+  const temp = existingTemp || fs.mkdtempSync(path.join(os.tmpdir(), 'chatbridge-'));
   const win = new EventEmitter();
   const actions = [];
   win.webContents = Object.assign(new EventEmitter(),{ id: 1, send: (...args) => actions.push(args),setZoomFactor:factor=>win.zoomFactor=factor,isDestroyed:()=>false });
@@ -52,7 +52,7 @@ test('isolates two WhatsApp sessions and switches within the application', async
     assert.notEqual(va.options.webPreferences.partition, vb.options.webPreferences.partition);
     assert.equal(va.visible, false); assert.equal(vb.visible, true);
     assert.equal(vb.url, 'https://web.whatsapp.com/');
-    assert.equal(vb.bounds.y, 108);
+    assert.equal(vb.bounds.y, 48);
     assert.equal(vb.bounds.x,144);
     assert(!vb.ua.includes('Electron/'));
     await f.invoke('signal'); assert.equal(vb.visible, false);
@@ -163,4 +163,18 @@ test('unread counts mirror background account events without clearing when accou
 
 test('WhatsApp aggregate message counts take precedence over a smaller unread-chat title',async()=>{
  const f=fixture();try{const a=await f.invoke('add-whatsapp','One'),view=f.instance.views.get(a.id);let count=8;view.webContents.executeJavaScript=async()=>count;view.webContents.emit('did-finish-load');await new Promise(r=>setImmediate(r));view.webContents.emit('page-title-updated',{},'(2) WhatsApp');await f.invoke('unread-report',2,view.webContents.id);await new Promise(r=>setImmediate(r));assert.equal((await f.invoke('unread-state')).find(e=>e.id===a.id).count,8);count=0;view.webContents.emit('page-title-updated',{},'WhatsApp');await new Promise(r=>setImmediate(r));assert.equal((await f.invoke('unread-state')).find(e=>e.id===a.id).count,0);}finally{f.close();}
+});
+
+
+test('mixed account order survives restart, new accounts append, removed keys disappear and page writes are denied',async()=>{
+ const f=fixture();let restarted;try{
+  const a=await f.invoke('add-whatsapp','One'),b=await f.invoke('add-whatsapp','Two');
+  const order=['whatsapp:'+b.id,'signal:default','whatsapp:'+a.id];
+  assert.deepEqual(await f.invoke('account-order',order),order);
+  restarted=fixture(f.temp);assert.deepEqual(await restarted.invoke('account-order'),order);
+  await assert.rejects(f.invoke('account-order',order,f.instance.views.get(a.id).webContents.id),/顶部/);
+  for(const bad of [order.slice(1),[order[0],order[0],order[2]],[...order,'signal:unknown'],null])await assert.rejects(f.invoke('account-order',bad),/排序无效/);
+  const c=await f.invoke('add-whatsapp','Three');assert.deepEqual(await f.invoke('account-order'),[...order,'whatsapp:'+c.id]);
+  await f.invoke('remove-account',{platform:'whatsapp',id:b.id});assert.deepEqual(await f.invoke('account-order'),order.slice(1).concat('whatsapp:'+c.id));
+ }finally{restarted?.close();f.close();}
 });

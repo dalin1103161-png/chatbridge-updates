@@ -61,8 +61,9 @@ function installPreload(options = {}) {
     `;
     const shell = make('div',null,document.body); shell.dataset.cbShell='1';
     const bar = make('div',null,shell); bar.dataset.chatbridgeBar='1';
-    bar.style.cssText='position:fixed;top:'+((wa||signalContent)?0:32)+'px;left:'+((wa||signalContent)?'0px':'var(--cb-sidebar-width,144px)')+';right:0;height:'+((wa||signalContent)?48:76)+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
+    bar.style.cssText='position:fixed;top:'+0+'px;left:'+((wa||signalContent)?'0px':'var(--cb-sidebar-width,144px)')+';right:0;height:'+48+'px;z-index:2147483646;background:linear-gradient(110deg,var(--cb-bg),var(--cb-panel));box-shadow:0 1px 18px #42e8df18;border-bottom:1px solid #ffffff15;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 16px;';
     const top = make('div',null,bar); top.style.cssText='display:flex;align-items:center;gap:10px;overflow-x:auto;flex-shrink:0;';
+    if(!wa&&!signalContent){top.dataset.cbWorkspaceActions='1';top.style.gap='8px';bar.style.padding='4px 16px';}
     const controls = make('div',null,bar); controls.style.cssText='display:flex;align-items:center;gap:15px;overflow-x:auto;flex-shrink:0;';
     if (wa||signalContent) { top.remove(); controls.style.height='100%'; }
     const applyPrefs = () => {
@@ -85,10 +86,10 @@ function installPreload(options = {}) {
     let accounts, load;
     if (!wa && !signalContent) {
       const sidebar=make('div',null,shell);sidebar.dataset.cbSidebar='1';
-      sidebar.style.cssText='position:fixed;left:0;top:32px;bottom:0;width:var(--cb-sidebar-width,144px);z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
+      sidebar.style.cssText='position:fixed;left:0;top:0;bottom:0;width:var(--cb-sidebar-width,144px);z-index:2147483646;background:var(--cb-bg);border-right:1px solid #ffffff15;display:flex;align-items:stretch;flex-direction:column;gap:10px;padding:18px 10px 14px;';
       let sidebarWidth=144,dragging=false,frame=null,pendingWidth=144,previousSelect='',previousCursor='',dragStartX=0,dragStartWidth=144,touched=false;
       const resize=make('div',null,shell);resize.dataset.cbResizer='1';resize.setAttribute('role','separator');resize.setAttribute('aria-label','调整账号栏宽度');resize.setAttribute('aria-orientation','vertical');resize.setAttribute('aria-valuemin','88');resize.setAttribute('aria-valuemax','320');resize.tabIndex=0;resize.title='拖动调整宽度，双击恢复默认';
-      resize.style.cssText='position:fixed;left:calc(var(--cb-sidebar-width,144px) - 8px);top:32px;bottom:0;width:8px;z-index:2147483647;cursor:col-resize;touch-action:none;';
+      resize.style.cssText='position:fixed;left:calc(var(--cb-sidebar-width,144px) - 8px);top:0;bottom:0;width:8px;z-index:2147483647;cursor:col-resize;touch-action:none;';
       const resizeCSS=make('style',null,document.head);resizeCSS.textContent='[data-cb-resizer]:hover,[data-cb-resizer]:focus-visible,[data-cb-resizer][data-dragging]{border-right:2px solid #42e8df;background:#42e8df25;outline:none}[data-cb-compact] [data-cb-account-name]{display:none}[data-cb-compact] [data-cb-account]>button:first-child{position:relative;justify-content:center;padding:8px 4px;gap:0}[data-cb-compact] [data-cb-account]>button:last-child{width:20px!important;flex-shrink:0}[data-cb-compact] [data-cb-unread]{position:absolute;right:0;top:0;font-size:9px!important;padding:0 3px!important}';
       const applyWidth=value=>{sidebarWidth=Math.max(88,Math.min(320,Math.round(value)));document.documentElement.style.setProperty('--cb-sidebar-width',sidebarWidth+'px');shell.toggleAttribute('data-cb-compact',sidebarWidth<120);resize.setAttribute('aria-valuenow',String(sidebarWidth));};
       const sendWidth=persist=>call('sidebar-width',{width:sidebarWidth,persist}).catch(()=>{});
@@ -105,7 +106,13 @@ function installPreload(options = {}) {
       const whatsapp=icon('WhatsApp','<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 1-12 7l-5 2 1-5a8 8 0 1 1 16-4Z"/><path d="M8 7c0 5 3 7 7 7l1-2-3-1-1 1-2-2 1-1-1-2Z"/></svg>');
       signal.style.display='none';whatsapp.style.display='none';
       const accountList=make('div',null,sidebar);accountList.dataset.cbAccountList='1';accountList.style.cssText='display:grid;align-content:start;gap:8px;overflow-y:auto;min-height:0;flex:1;';
-      let waList=[],signalList=[],currentSignal='default',selected=null;
+      let waList=[],signalList=[],currentSignal='default',selected=null,accountOrder=[],dragged=null,dropSaved=false,orderBusy=false;
+      const rowKeys=()=>[...accountList.children].map(row=>row.dataset.cbAccount);
+      const arrange=()=>{const ranks=new Map(accountOrder.map((key,i)=>[key,i]));[...accountList.children].sort((a,b)=>(ranks.get(a.dataset.cbAccount)??Infinity)-(ranks.get(b.dataset.cbAccount)??Infinity)).forEach(row=>accountList.append(row));};
+      const saveOrder=async()=>{const before=accountOrder;accountOrder=rowKeys();orderBusy=true;try{const saved=await call('account-order',accountOrder);if(Array.isArray(saved))accountOrder=saved;}catch(error){accountOrder=before;arrange();status.textContent='排序保存失败，请重试 / Could not save order';}finally{orderBusy=false;}};
+      call('account-order').then(order=>{if(Array.isArray(order)&&!dragged&&!orderBusy){accountOrder=order;arrange();}}).catch(()=>{});
+      accountList.ondragover=event=>{if(!dragged)return;event.preventDefault();event.dataTransfer.dropEffect='move';const rows=[...accountList.children].filter(row=>row!==dragged);const next=rows.find(row=>event.clientY<row.getBoundingClientRect().top+row.getBoundingClientRect().height/2);accountList.insertBefore(dragged,next||null);const rect=accountList.getBoundingClientRect();if(event.clientY<rect.top+30)accountList.scrollTop-=16;else if(event.clientY>rect.bottom-30)accountList.scrollTop+=16;};
+      accountList.ondrop=event=>{if(!dragged)return;event.preventDefault();dropSaved=true;saveOrder();};
       brand.onclick=async()=>{if(await invoke('home',null,status)){selected=null;renderAccounts();}};
       if(ipc.on)ipc.on('chatbridge:home',()=>{selected=null;renderAccounts();});
       const badges=new Map(),badgeRevisions=new Map();
@@ -124,19 +131,22 @@ function installPreload(options = {}) {
         accountList.replaceChildren();
         for(const [platform,list,svg] of [['signal',signalList,signal.innerHTML],['whatsapp',waList,whatsapp.innerHTML]]) {
           for(const account of list){
-            const row=make('div',null,accountList);row.dataset.cbAccount=platform+':'+account.id;
+            const row=make('div',null,accountList);row.dataset.cbAccount=platform+':'+account.id;row.draggable=true;row.title='按住拖动调整顺序 / Drag to reorder';
+            row.ondragstart=event=>{if(orderBusy||event.target.closest('[data-cb-account-menu]')){event.preventDefault();return;}accountOrder=rowKeys();dragged=row;dropSaved=false;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',row.dataset.cbAccount);row.style.opacity='.45';};
+            row.ondragend=()=>{row.style.opacity='';dragged=null;if(!dropSaved)arrange();};
             row.style.cssText='display:flex;gap:3px;align-items:center;border:1px solid '+(selected===row.dataset.cbAccount?'var(--cb-accent)':'#ffffff18')+';border-radius:12px;background:linear-gradient(120deg,#ffffff0d,transparent);';
             const open=make('button',null,row);open.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0;width:auto;height:48px;padding:8px;border:0;text-align:left;';
             const symbol=make('span',null,open);symbol.innerHTML=svg;symbol.style.cssText='color:'+(platform==='whatsapp'?'#42e698':'#78a8ff')+';flex-shrink:0;';
             const caption=make('span',account.name,open);caption.dataset.cbAccountName='1';caption.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';open.title=account.name;
             paintBadge(open,badges.get(platform+':'+account.id)||0);
-            open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
-            const rename=make('button','⋯',row);rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
+            open.onclick=async()=>{if(dragged)return;const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
+            const rename=make('button','⋯',row);rename.dataset.cbAccountMenu='1';rename.draggable=false;rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
             rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
               remove.onclick=()=>{form.replaceChildren();make('h2','确认删除账号？ / Remove account?',form);make('p',account.name,form);make('p','仅从账号列表移除，保留本地登录和聊天数据；不会删除手机上的账号。',form);const report=make('span','',form);const confirm=make('button','确认删除 / Confirm removal',form);confirm.style.color='#ff8095';confirm.onclick=async()=>{confirm.disabled=true;const result=await invoke('remove-account',{platform,id:account.id},report);confirm.disabled=false;if(result){await load();await loadSignals();overlay.remove();status.textContent='账号已从列表移除，本地数据已保留';}};make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
               make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
           }
         }
+        arrange();
       };
       if(ipc.on)ipc.on('chatbridge:unread',(_e,data)=>applyUnread(data));
       call('unread-state').then(entries=>{if(Array.isArray(entries))for(const entry of entries)applyUnread(entry);}).catch(()=>{});
@@ -252,7 +262,7 @@ function installPreload(options = {}) {
     }
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');
     const layout=make('style',null,document.head);
-    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:108px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 108px)!important;}';
+    layout.textContent=signalContent?'#app-container{position:fixed!important;top:48px!important;left:0!important;right:0!important;bottom:0!important;width:100%!important;height:calc(100% - 48px)!important;}':wa?'#app{height:calc(100vh - 48px)!important;margin-top:48px!important;}':'#app-container{position:fixed!important;top:48px!important;left:var(--cb-sidebar-width,144px)!important;right:0!important;bottom:0!important;width:calc(100% - var(--cb-sidebar-width,144px))!important;height:calc(100% - 48px)!important;}';
     call('preferences').then(p=>{if(p&&['zh','en'].includes(p.language)){prefs=p;applyPrefs();}}).catch(()=>{});
     if(ipc.on)ipc.on('chatbridge:preferences',(_e,p)=>{prefs=p;applyPrefs();});
     applyPrefs();setInterval(scan,1000);
@@ -363,3 +373,4 @@ function installPreload(options = {}) {
 }
 module.exports = { installPreload,signalUnreadCount };
 if (typeof process !== 'undefined' && process.argv.includes('--chatbridge-whatsapp')) installPreload({ whatsapp: true });
+
