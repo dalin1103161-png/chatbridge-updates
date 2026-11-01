@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use strict';
 
+function signalUnreadCount(lookup){
+ if(!lookup||typeof lookup!=='object'||Array.isArray(lookup))return null;
+ let total=0;for(const row of Object.values(lookup)){if(!row||row.unreadCount===undefined)continue;if(!Number.isSafeInteger(row.unreadCount)||row.unreadCount<0)return null;total+=row.unreadCount;if(!Number.isSafeInteger(total))return null;}return total;
+}
 function installPreload(options = {}) {
   const ipc = options.ipc || require('electron').ipcRenderer;
   const signalContent = options.signalContent ?? process.argv.includes('--chatbridge-signal-content');
@@ -104,7 +108,18 @@ function installPreload(options = {}) {
       let waList=[],signalList=[],currentSignal='default',selected=null;
       brand.onclick=async()=>{if(await invoke('home',null,status)){selected=null;renderAccounts();}};
       if(ipc.on)ipc.on('chatbridge:home',()=>{selected=null;renderAccounts();});
-      const badges=new Map();
+      const badges=new Map(),badgeRevisions=new Map();
+      const paintBadge=(open,count)=>{
+        let badge=open.querySelector('[data-cb-unread]');if(!count){badge?.remove();return;}
+        if(!badge){badge=make('span',null,open);badge.dataset.cbUnread='1';badge.style.cssText='border-radius:20px;background:#e11d48;color:white;padding:1px 5px;font-size:10px;line-height:16px;min-width:16px;text-align:center;flex-shrink:0;margin-left:auto;box-shadow:0 0 8px #e11d4844;';}
+        badge.textContent=String(count);badge.setAttribute('aria-label','未读消息 '+count);
+      };
+      const applyUnread=data=>{
+        if(!data||!['signal','whatsapp'].includes(data.platform)||typeof data.id!=='string'||!Number.isSafeInteger(data.count)||data.count<0)return;
+        const key=data.platform+':'+data.id,revision=Number.isSafeInteger(data.revision)?data.revision:0;
+        if(revision<(badgeRevisions.get(key)??-1))return;badgeRevisions.set(key,revision);badges.set(key,data.count);
+        const row=[...accountList.children].find(r=>r.dataset.cbAccount===key);if(row)paintBadge(row.querySelector('button'),data.count);
+      };
       const renderAccounts=()=>{
         accountList.replaceChildren();
         for(const [platform,list,svg] of [['signal',signalList,signal.innerHTML],['whatsapp',waList,whatsapp.innerHTML]]) {
@@ -114,7 +129,7 @@ function installPreload(options = {}) {
             const open=make('button',null,row);open.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0;width:auto;height:48px;padding:8px;border:0;text-align:left;';
             const symbol=make('span',null,open);symbol.innerHTML=svg;symbol.style.cssText='color:'+(platform==='whatsapp'?'#42e698':'#78a8ff')+';flex-shrink:0;';
             const caption=make('span',account.name,open);caption.dataset.cbAccountName='1';caption.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';open.title=account.name;
-            const count=badges.get(account.id)||0;if(count){const badge=make('span',count>99?'99+':String(count),open);badge.dataset.cbUnread='1';badge.style.cssText='border-radius:20px;background:#f05179;color:white;padding:1px 5px;font-size:10px;';}
+            paintBadge(open,badges.get(platform+':'+account.id)||0);
             open.onclick=async()=>{const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
             const rename=make('button','⋯',row);rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
             rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
@@ -123,7 +138,8 @@ function installPreload(options = {}) {
           }
         }
       };
-      if(ipc.on)ipc.on('chatbridge:unread',(_e,data)=>{badges.set(data.id,data.count);renderAccounts();});
+      if(ipc.on)ipc.on('chatbridge:unread',(_e,data)=>applyUnread(data));
+      call('unread-state').then(entries=>{if(Array.isArray(entries))for(const entry of entries)applyUnread(entry);}).catch(()=>{});
 
       const spacer=make('div',null,sidebar);spacer.style.display='none';
       const settings=icon('Settings','<svg viewBox="0 0 24 24"><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg>');
@@ -240,6 +256,20 @@ function installPreload(options = {}) {
     call('preferences').then(p=>{if(p&&['zh','en'].includes(p.language)){prefs=p;applyPrefs();}}).catch(()=>{});
     if(ipc.on)ipc.on('chatbridge:preferences',(_e,p)=>{prefs=p;applyPrefs();});
     applyPrefs();setInterval(scan,1000);
+    if(signalContent&&ipc.send){
+      let store,unsubscribe,lastLookup,lastUnread,scheduled=false;
+      const refresh=()=>{const lookup=store?.getState?.()?.conversations?.conversationLookup;if(lookup===lastLookup)return;const count=signalUnreadCount(lookup);if(count===null)return;lastLookup=lookup;if(count!==lastUnread){lastUnread=count;ipc.send('chatbridge:signal-unread',count);}};
+      const schedule=()=>{if(scheduled)return;scheduled=true;setTimeout(()=>{scheduled=false;refresh();},50);};
+      const connect=()=>{const candidate=globalThis.reduxStore||globalThis.window?.reduxStore;if(candidate!==store&&typeof candidate?.getState==='function'&&typeof candidate?.subscribe==='function'){unsubscribe?.();store=candidate;lastLookup=undefined;unsubscribe=store.subscribe(schedule);}refresh();};
+      const timer=setInterval(connect,1000);globalThis.addEventListener?.('pagehide',()=>{clearInterval(timer);unsubscribe?.();},{once:true});connect();
+    }
+    if(wa){
+      let lastUnread;
+      const reportUnread=()=>{const title=document.title.replace(/^[\s\u200e\u200f]+/,'');const match=/^[（(]\s*([\d,\u00a0 ]+)\s*[)）]\s*WhatsApp\b/i.exec(title);const count=match?Number(match[1].replace(/[,\s\u00a0]/g,'')):/^WhatsApp\b/i.test(title)?0:null;if(count===null||!Number.isSafeInteger(count)||count<0||count===lastUnread)return;lastUnread=count;call('unread-report',count).catch(()=>{lastUnread=undefined;});};
+      const timer=setInterval(reportUnread,3000);let titleObserver;
+      if(typeof MutationObserver!=='undefined'){titleObserver=new MutationObserver(reportUnread);titleObserver.observe(document.head,{childList:true,subtree:true,characterData:true});}
+      globalThis.addEventListener?.('pagehide',()=>{clearInterval(timer);titleObserver?.disconnect();},{once:true});reportUnread();
+    }
     if(typeof MutationObserver!=='undefined'){
       let scheduled=false;
       const observer=new MutationObserver(records=>{
@@ -331,5 +361,5 @@ function installPreload(options = {}) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
   return { scan, state, messageRows };
 }
-module.exports = { installPreload };
+module.exports = { installPreload,signalUnreadCount };
 if (typeof process !== 'undefined' && process.argv.includes('--chatbridge-whatsapp')) installPreload({ whatsapp: true });

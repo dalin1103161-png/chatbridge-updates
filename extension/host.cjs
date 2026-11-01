@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use strict';
 const {bindInput,edit}=require('./input.cjs');
+const {bindSignalUnread,validCount}=require('./unread.cjs');
 const path=require('node:path');const net=require('node:net');const crypto=require('node:crypto');const readline=require('node:readline');const {spawn}=require('node:child_process');
 const hwnd=w=>{const b=w.getNativeWindowHandle();return (b.length===8?b.readBigUInt64LE():BigInt(b.readUInt32LE())).toString();};
 function createNativeWorkspace(signalWindow,rootDir,electron){
  const {BrowserWindow,screen,app}=electron;
  const host=new BrowserWindow({width:1280,height:900,minWidth:900,minHeight:650,title:'ChatBridge',backgroundColor:'#080e1a',autoHideMenuBar:true,webPreferences:{preload:path.join(rootDir,'chatbridge/shell-preload.cjs'),sandbox:false,contextIsolation:true,nodeIntegration:false}});
  host.loadFile(path.join(rootDir,'chatbridge/shell.html'));
+ bindSignalUnread(signalWindow.webContents,electron.ipcMain,count=>host.emit('chatbridge:signal-unread','default',count));
  const pipe='\\\\.\\pipe\\chatbridge-'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex');
  const windows=new Map(),children=new Map(),pending=new Map();let sidebarWidth=144,active=null,sequence=0,ready=false,closed=false,suspended=false,focusRevision=0;
  const focusTrace=[];let keyEvents=0,lastKeyAt=0,lastModifiers={};signalWindow.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();lastModifiers={control:input.control===true,shift:input.shift===true,alt:input.alt===true,meta:input.meta===true};}});
@@ -42,6 +44,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  const server=net.createServer(socket=>{clients.add(socket);socket.once('close',()=>clients.delete(socket));let authenticated=false,profile='';const lines=readline.createInterface({input:socket});
   lines.on('line',async line=>{if(line.length>50000){socket.destroy();return;}try{const m=JSON.parse(line);
    if(!authenticated){const child=children.get(m.profile);if(m.token!==token||!child||child.pid!==m.pid||!/^\d+$/.test(m.hwnd)){socket.destroy();return;}authenticated=true;profile=m.profile;socket.chatbridgeProfile=profile;attach(profile,m.hwnd,m.pid);return;}
+   if(Object.prototype.hasOwnProperty.call(m,'unreadCount')){if(validCount(m.unreadCount))host.emit('chatbridge:signal-unread',profile,m.unreadCount);return;}
    if(m.focusRequested){if(profile===active&&!suspended)requestSignalFocus();return;}
    if(m.hidden){host.emit('chatbridge:chat-hidden');requestSignalFocus();return;}
    if(m.shown){const record=windows.get(profile);if(record)command(record);if(profile===active&&!suspended)setImmediate(requestSignalFocus);return;}
@@ -83,12 +86,15 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    // Native render-widget focus must remain the final step after Chromium/React focus handling.
   });
  }
+ async function ensureSignal(id){
+  if(id==='default'||windows.has(id)||children.has(id))return;await listening;
+  if(children.has(id))return;
+  const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
+  const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});layout();
+ }
  const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,lastModifiers,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
-  async open(id){active=id;if(id==='default'||windows.has(id)){layout();requestSignalFocus();return;}await listening;
-   if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
-    const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}
-   layout();
-  },suspend(value){suspended=value;layout();if(!value)requestSignalFocus();},hide(){active=null;layout();},close(id){if(id==='default'){if(active===id)active=null;layout();return;}const child=children.get(id);if(child)child.kill();children.delete(id);windows.delete(id);},
+  start:ensureSignal,
+  async open(id){active=id;await ensureSignal(id);layout();requestSignalFocus();},suspend(value){suspended=value;layout();if(!value)requestSignalFocus();},hide(){active=null;layout();},close(id){if(id==='default'){if(active===id)active=null;layout();return;}const child=children.get(id);if(child)child.kill();children.delete(id);windows.delete(id);},
  };
  host.on('close',event=>{event.preventDefault();shutdown().catch(e=>{error(e.message);app.quit();});});
  return controller;
@@ -99,6 +105,7 @@ function installManagedSignal(window,electron){
  let electronVisible=false,keyEvents=0,lastKeyAt=0,lastModifiers={};window.webContents.on('before-input-event',(_e,input)=>{if(input.type==='keyDown'){keyEvents++;lastKeyAt=Date.now();lastModifiers={control:input.control===true,shift:input.shift===true,alt:input.alt===true,meta:input.meta===true};}});
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);
  const connected=new Promise((resolve,reject)=>{socket.once('connect',()=>{socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n');resolve();});socket.once('error',reject);socket.once('close',()=>reject(Error('账号连接已关闭。')));});connected.catch(()=>{});
+ bindSignalUnread(window.webContents,ipcMain,count=>{connected.then(()=>{if(!socket.destroyed)socket.write(JSON.stringify({unreadCount:count})+'\n');}).catch(()=>{});});
  window.webContents.on('before-mouse-event',(_event,input)=>{if(input.type==='mouseDown')setImmediate(()=>{if(electronVisible&&socket.readyState==='open')socket.write(JSON.stringify({focusRequested:true})+'\n');});});
  window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});

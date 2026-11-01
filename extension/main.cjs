@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {zoomState,bindZoom}=require('./zoom.cjs');
 const {bindInput,edit}=require('./input.cjs');
+const {createUnreadState,titleUnread,validCount}=require('./unread.cjs');
 
 function validTranslation(value) {
   if (!value || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 10000 || !['en', 'zh-Hans'].includes(value.target)) {
@@ -89,7 +90,9 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const updateTitle = () => window.setTitle?.(config.windowTitle || 'ChatBridge');
   updateTitle();
   window.webContents.on?.('page-title-updated', event => { if (config.windowTitle) { event.preventDefault(); updateTitle(); } });
-  const unread = new Map();
+  const unread=createUnreadState(entry=>window.webContents.send('chatbridge:unread',entry));
+  const reportSignalUnread=(id,count)=>{if(signalAccounts().some(a=>a.id===id))unread.update('signal',id,count);};
+  window.on('chatbridge:signal-unread',reportSignalUnread);
   const bounds = () => {
     const [width, height] = window.getContentSize();
     for (const view of views.values()) view.setBounds({ x: sidebarWidth, y: 108, width: Math.max(1, width - sidebarWidth), height: Math.max(1, height - 108) });
@@ -102,13 +105,13 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     bounds();
     if(id!==null)focusWhatsApp(id);
   }
-  function openWhatsApp(account) {
+  function ensureWhatsApp(account) {
     if (!views.has(account.id)) {
       const view = new WebContentsView({ webPreferences: {
         partition: 'persist:chatbridge-wa-' + account.id,
         preload: path.join(rootDir, 'chatbridge', 'preload.cjs'),
         additionalArguments: ['--chatbridge-whatsapp'],
-        sandbox: true, contextIsolation: true, nodeIntegration: false,
+        sandbox: true, contextIsolation: true, nodeIntegration: false,backgroundThrottling:false,
       } });
       views.set(account.id, view);
       allowed.add(view.webContents.id);
@@ -124,9 +127,9 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         catch { event.preventDefault(); }
       });
       view.webContents.on('page-title-updated', (_event, title) => {
-        const count = Math.min(9999, Number(/^\((\d+)\)/.exec(title)?.[1] || 0));
-        const previous = unread.get(account.id); unread.set(account.id, count);
-        window.webContents.send('chatbridge:unread', { id: account.id, count });
+        const count=titleUnread(title);if(count===null)return;
+        const previous=unread.snapshot().find(e=>e.platform==='whatsapp'&&e.id===account.id)?.count;
+        unread.update('whatsapp',account.id,count);
         if (previous !== undefined && count > previous && config.notifications !== false && Notification?.isSupported()) {
           const toast = new Notification({ title: account.name, body: 'WhatsApp 有新消息', silent: config.sound === false });
           toast.on('click', () => { window.show?.(); window.focus?.(); openWhatsApp(account); }); toast.show();
@@ -135,14 +138,16 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       view.webContents.on('did-finish-load',()=>{if(activeId===account.id)focusWhatsApp(account.id);});
       view.webContents.loadURL('https://web.whatsapp.com/');
     }
-    show(account.id);
   }
+  function openWhatsApp(account){ensureWhatsApp(account);show(account.id);}
   const authorized = event => {
     if (!allowed.has(event.sender.id)) throw new Error('此页面没有调用翻译接口的权限。');
   };
   const handleRequest = async (event, method, value) => {
     authorized(event);
     if(method==='edit')return edit(event.sender,value);
+    if(method==='unread-state'){if(event.sender.id!==window.webContents.id)throw Error('仅工作空间可读取未读状态。');return unread.snapshot();}
+    if(method==='unread-report'){const account=config.accounts.find(a=>views.get(a.id)?.webContents.id===event.sender.id);if(!account||!validCount(value))throw Error('未读状态无效。');unread.update('whatsapp',account.id,value);return true;}
     if(method==='input-diagnostics')return native?native.inputDiagnostics():{available:false};
     if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
@@ -193,11 +198,11 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         config.accounts.splice(index, 1); save();
         const view = views.get(value.id);
         if (view) { allowed.delete(view.webContents.id); zoomBindings.delete(view.webContents.id); window.contentView.removeChildView?.(view); if (!view.webContents.isDestroyed()) view.webContents.close(); views.delete(value.id); }
-        unread.delete(value.id); if (activeId === value.id) show(null);
+        unread.remove('whatsapp',value.id); if (activeId === value.id) show(null);
       } else {
         const account = signalAccounts().find(a => a.id === value.id); if (!account) throw new Error('未知账号。');
         fs.writeFileSync(path.join(registryDir, account.id + '.removed'), '', { mode: 0o600 });
-        if(native)native.close(account.id);
+        unread.remove('signal',account.id);if(native)native.close(account.id);
       }
       activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');
       return { removed: true, retainedLocalData: true };
@@ -239,6 +244,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   };
   ipcMain.handle('chatbridge:invoke',handleRequest);
   if(native)native.setRPC((method,value,profile)=>{if(method==='chat-zoom'){if(!signalAccounts().some(a=>a.id===profile))throw Error('未知 Signal 账号。');return accountZoom('signal',profile,value);}return handleRequest({sender:{id:window.webContents.id}},method,value);});
+  for(const account of config.accounts)ensureWhatsApp(account);
+  if(native)for(const account of signalAccounts())if(account.id!=='default')native.start(account.id).catch(()=>window.webContents.send('chatbridge:launch-error','Signal 后台账号启动失败，请点击账号重试。'));
   window.on('resize', bounds);
   let updateTimer;
   if (updater) { updater.check(); updateTimer=setInterval(()=>updater.check(),6*60*60*1000);updateTimer.unref(); }

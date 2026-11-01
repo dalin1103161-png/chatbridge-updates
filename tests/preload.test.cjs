@@ -5,8 +5,9 @@ const {installPreload}=require('../extension/preload.cjs');
 function fixture(whatsapp=false,html,translation,signalContent=false){
  const dom=new JSDOM(html||'<!doctype html><body><div class="module-ConversationHeader__header__info__title">Friend</div><div data-message-id="old"><span class="module-message__text">Hello from history</span></div></body>',{url:'https://fixture.invalid'});
  const old={document:global.document,interval:global.setInterval,installed:global.__chatbridgeInstalled};global.document=dom.window.document;global.setInterval=()=>1;delete global.__chatbridgeInstalled;
- let percent=100;const calls=[];const ipc={invoke:async(_channel,method,value)=>{
+ let percent=100;const calls=[],listeners=new Map();const ipc={on:(channel,callback)=>listeners.set(channel,callback),invoke:async(_channel,method,value)=>{
   calls.push({method,value});
+  if(method==='unread-state')return [];
   if(method==='chat-zoom'){if(value)percent=value.action==='reset'?100:Math.max(50,Math.min(200,percent+(value.action==='in'?10:-10)));return {percent,min:50,max:200};}
   if(method==='accounts')return [{id:'wa-one',name:'Work WA'},{id:'wa-two',name:'Personal WA'}];
   if(method==='signal-accounts')return {accounts:[{id:'default',name:'Signal Work'}],current:'default'};
@@ -15,7 +16,7 @@ function fixture(whatsapp=false,html,translation,signalContent=false){
   return true;
  }};
  const api=installPreload({ipc,whatsapp,signalContent});dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
- return {dom,api,calls,async close(){await api.state.serial;global.document=old.document;global.setInterval=old.interval;global.__chatbridgeInstalled=old.installed;dom.window.close();}};
+ return {dom,api,calls,emit:(channel,data)=>listeners.get(channel)?.({},data),async close(){await api.state.serial;global.document=old.document;global.setInterval=old.interval;global.__chatbridgeInstalled=old.installed;dom.window.close();}};
 }
 const requests=f=>f.calls.filter(x=>x.method==='translate');
 test('opening a chat automatically translates loaded text without switches or clicks',async()=>{
@@ -125,4 +126,23 @@ test('Signal input diagnostics copy only control metadata, never message or draf
   const button=[...d.querySelectorAll('button')].find(b=>b.textContent==='输入诊断');assert(button);await button.onclick();
   const payload=f.calls.filter(c=>c.method==='copy').at(-1).value;assert(!payload.includes('PRIVATE_DRAFT_DO_NOT_COPY'));assert(!payload.includes('Hello from history'));assert.equal(JSON.parse(payload).editor.tag,'TEXTAREA');
  }finally{await f.close();}
+});
+
+
+test('account unread badges are scoped by platform, retain exact numbers and clear only on zero',async()=>{
+ const f=fixture();try{await new Promise(r=>setImmediate(r));const d=f.dom.window.document;
+  f.emit('chatbridge:unread',{platform:'signal',id:'default',count:3,revision:1});
+  f.emit('chatbridge:unread',{platform:'whatsapp',id:'wa-one',count:127,revision:2});
+  const row=key=>[...d.querySelectorAll('[data-cb-account]')].find(r=>r.dataset.cbAccount===key),badge=key=>row(key).querySelector('[data-cb-unread]');
+  assert.equal(badge('signal:default').textContent,'3');assert.equal(badge('whatsapp:wa-one').textContent,'127');
+  const original=row('signal:default');row('signal:default').querySelector('button').focus();
+  f.emit('chatbridge:unread',{platform:'signal',id:'default',count:4,revision:3});assert.equal(row('signal:default'),original);assert.equal(d.activeElement,original.querySelector('button'));
+  f.emit('chatbridge:unread',{platform:'signal',id:'default',count:1,revision:1});assert.equal(badge('signal:default').textContent,'4');
+  await row('whatsapp:wa-one').querySelector('button').onclick();assert.equal(badge('signal:default').textContent,'4');assert.equal(badge('whatsapp:wa-one').textContent,'127');
+  f.emit('chatbridge:unread',{platform:'signal',id:'default',count:0,revision:4});assert.equal(badge('signal:default'),null);assert.equal(badge('whatsapp:wa-one').textContent,'127');
+ }finally{await f.close();}
+});
+
+test('Signal message totals include all conversation messages rather than unread-chat counts',()=>{
+ const {signalUnreadCount}=require('../extension/preload.cjs');assert.equal(signalUnreadCount({a:{unreadCount:3},b:{unreadCount:4,isArchived:true},c:{unreadCount:2,muteExpiresAt:9999999999},d:{}}),9);assert.equal(signalUnreadCount({}),0);assert.equal(signalUnreadCount(null),null);assert.equal(signalUnreadCount({a:{unreadCount:-1}}),null);
 });

@@ -156,3 +156,7 @@ test('chat zoom changes content scale per account, validates actions and persist
   await f.invoke('chat-zoom',{action:'reset'},va.webContents.id);assert.equal(va.zoomFactor,1);
  }finally{f.close();}
 });
+
+test('unread counts mirror background account events without clearing when accounts are opened',async()=>{
+ const f=fixture();try{const a=await f.invoke('add-whatsapp','One'),b=await f.invoke('add-whatsapp','Two');const va=f.instance.views.get(a.id),vb=f.instance.views.get(b.id);va.webContents.emit('page-title-updated',{},'(6) WhatsApp');await f.invoke('unread-report',9,vb.webContents.id);f.win.emit('chatbridge:signal-unread','default',4);await f.invoke('whatsapp',b.id);const state=await f.invoke('unread-state');assert.equal(state.find(e=>e.platform==='signal').count,4);assert.equal(state.find(e=>e.id===a.id).count,6);assert.equal(state.find(e=>e.id===b.id).count,9);await assert.rejects(f.invoke('unread-state',undefined,va.webContents.id));await assert.rejects(f.invoke('unread-report',2,1));await f.invoke('unread-report',0,vb.webContents.id);assert.equal((await f.invoke('unread-state')).find(e=>e.id===b.id).count,0);}finally{f.close();}
+});
