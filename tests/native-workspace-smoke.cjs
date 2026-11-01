@@ -8,7 +8,7 @@ app.whenReady().then(async()=>{
   require(path.join(app.getAppPath(),'chatbridge/host.cjs')).installManagedSignal(w,require('electron'));
   await w.loadURL('data:text/html,<body>Signal window fixture</body>');
   let wasVisible=false,busy=false,round=0;
-  setInterval(async()=>{if(!w.isVisible()){wasVisible=false;return;}if(wasVisible||busy)return;wasVisible=true;busy=true;try{await require(path.join(app.getAppPath(),'input-roundtrip.cjs'))(w,{focus:false});round++;fs.writeFileSync(path.join(app.getAppPath(),process.env.CHATBRIDGE_SIGNAL_PROFILE+'.input'),JSON.stringify({round,result:'pass'}));}catch(e){fs.writeFileSync(path.join(app.getAppPath(),process.env.CHATBRIDGE_SIGNAL_PROFILE+'.input'),JSON.stringify({round:++round,result:e.stack}));}finally{busy=false;}},25);return;
+  setInterval(async()=>{if(!w.isVisible()){wasVisible=false;return;}if(wasVisible||busy)return;wasVisible=true;busy=true;try{await require(path.join(app.getAppPath(),'input-roundtrip.cjs'))(w,{focus:false,mouse:true});round++;fs.writeFileSync(path.join(app.getAppPath(),process.env.CHATBRIDGE_SIGNAL_PROFILE+'.input'),JSON.stringify({round,result:'pass'}));}catch(e){fs.writeFileSync(path.join(app.getAppPath(),process.env.CHATBRIDGE_SIGNAL_PROFILE+'.input'),JSON.stringify({round:++round,result:e.stack}));}finally{busy=false;}},25);return;
  }
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'cb-native-smoke-'));
  fs.cpSync(path.join(__dirname,'../extension'),path.join(directory,'chatbridge'),{recursive:true});
@@ -27,11 +27,11 @@ app.whenReady().then(async()=>{
   assert.equal(new Set(s.windows.map(r=>r.pid)).size,2);
   await wait(()=>result(b).round>=1);assert.equal(result(b).result,'pass');console.log('CHILD_SIGNAL_OS_KEYBOARD_PASS');
   await controller.open(a);await wait(()=>result(a).round>=1);assert.equal(result(a).result,'pass');assert.equal(controller.snapshot().active,a);assert.equal(controller.snapshot().windows.length,3);console.log('SECOND_SIGNAL_OS_KEYBOARD_PASS');
-  await controller.open('default');await wait(()=>w.isVisible());await require('./input-roundtrip.cjs')(w,{focus:false});console.log('DEFAULT_SIGNAL_OS_KEYBOARD_PASS');
+  await controller.open('default');await wait(()=>w.isVisible());await require('./input-roundtrip.cjs')(w,{focus:false,mouse:true});console.log('DEFAULT_SIGNAL_OS_KEYBOARD_PASS');
   controller.hide();await wait(()=>!w.isVisible());const wa=new WebContentsView({webPreferences:{preload:path.join(directory,'chatbridge/shell-preload.cjs'),sandbox:false,additionalArguments:['--chatbridge-whatsapp']}});controller.host.contentView.addChildView(wa);wa.setVisible(true);wa.setBounds({x:144,y:108,width:700,height:500});require('../extension/input.cjs').bindInput(wa.webContents,controller.host);await wa.webContents.loadURL('data:text/html,<body>WhatsApp input fixture</body>');controller.host.webContents.focus();await controller.focusHost();controller.host.focus();await require('./input-roundtrip.cjs')({webContents:wa.webContents});wa.webContents.close();console.log('WHATSAPP_VIEW_OS_KEYBOARD_PASS');
   for(let round=2;round<=4;round++){
    for(const id of [b,a]){await controller.open(id);await wait(()=>result(id).round>=round);assert.equal(result(id).result,'pass');}
-   await controller.open('default');await wait(()=>w.isVisible());await require('./input-roundtrip.cjs')(w,{focus:false});
+   await controller.open('default');await wait(()=>w.isVisible());await require('./input-roundtrip.cjs')(w,{focus:false,mouse:true});
    console.log('SIGNAL_ACCOUNT_RESELECT_OS_KEYBOARD_PASS',round);
   }
   controller.setSidebarWidth(104);await wait(()=>Math.abs(w.getContentSize()[0]-(controller.host.getContentSize()[0]-104))<=2);assert.equal(controller.snapshot().sidebarWidth,104);
