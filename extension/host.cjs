@@ -44,7 +44,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(!authenticated){const child=children.get(m.profile);if(m.token!==token||!child||child.pid!==m.pid||!/^\d+$/.test(m.hwnd)){socket.destroy();return;}authenticated=true;profile=m.profile;socket.chatbridgeProfile=profile;attach(profile,m.hwnd,m.pid);return;}
    if(m.focusRequested){if(profile===active&&!suspended)requestSignalFocus();return;}
    if(m.hidden){host.emit('chatbridge:chat-hidden');requestSignalFocus();return;}
-   if(m.shown){const record=windows.get(profile);if(record)command(record);return;}
+   if(m.shown){const record=windows.get(profile);if(record)command(record);if(profile===active&&!suspended)setImmediate(requestSignalFocus);return;}
    if(!['translate','copy','preferences','chat-zoom','input-diagnostics'].includes(m.method))throw Error('Unsupported child request');
    const result=await rpc(m.method,m.value,profile);if(!socket.destroyed)socket.write(JSON.stringify({id:m.id,result})+'\n');
   }catch(e){let id=0;try{id=JSON.parse(line).id;}catch{}if(authenticated&&!socket.destroyed)socket.write(JSON.stringify({id,error:e.message})+'\n');}});
@@ -80,8 +80,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    const record=windows.get(id);
    if(closed||suspended||revision!==focusRevision||!record?.attached||!record.electronVisible)return;
    if(!(await focusNative(record.hwnd,record.pid,true))||closed||suspended||active!==id||revision!==focusRevision)return;
-   if(id==='default')signalWindow.webContents.focus();
-   else {const client=[...clients].find(c=>c.chatbridgeProfile===id);if(client&&!client.destroyed)client.write(JSON.stringify({focus:true})+'\n');}
+   // Native render-widget focus must remain the final step after Chromium/React focus handling.
   });
  }
  const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
