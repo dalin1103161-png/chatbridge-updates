@@ -1,3 +1,4 @@
+# Native Windows key codes for CDP keyboard verification
 name: Verify existing packaged chat zoom
 on:
   push:
