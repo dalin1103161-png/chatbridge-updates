@@ -147,7 +147,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     }
     if (method === 'copy') {
       if (typeof value !== 'string' || value.length > 10000) throw new Error('复制内容无效。');
-      clipboard.writeText(value); return true;
+      await clipboard.writeText(value); return true;
     }
     if (method === 'preferences') {
       const fallback = { language: 'zh', theme: 'cyan', size: 'normal' };

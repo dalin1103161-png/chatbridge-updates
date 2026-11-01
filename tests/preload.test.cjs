@@ -107,11 +107,11 @@ test('chat toolbar zoom controls show percent and support enlarge, shrink and re
  const f=fixture(false,undefined,undefined,true);try{await f.api.state.serial;await new Promise(r=>setImmediate(r));const d=f.dom.window.document,reset=d.querySelector('[data-cb-zoom-reset]');assert(reset);assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();assert.equal(reset.textContent,'110%');await d.querySelector('[data-cb-zoom-out]').onclick();assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();await reset.onclick();assert.equal(reset.textContent,'100%');assert.equal(d.querySelectorAll('[data-chatbridge-bar] input[type=checkbox]').length,0);}finally{await f.close();}
 });
 
-test('editing shortcuts stay with the current renderer while Enter and ordinary typing remain native',async()=>{
+test('synthetic page shortcuts cannot access clipboard and ordinary typing remains native',async()=>{
  const f=fixture(true);try{
   const d=f.dom.window.document;
   for(const [key,extra,command] of [['c',{},'copy'],['v',{},'paste'],['v',{shiftKey:true},'pasteAndMatchStyle'],['a',{},'selectAll']]){
-   const e=new f.dom.window.KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true,...extra});d.dispatchEvent(e);assert(e.defaultPrevented);assert.deepEqual(f.calls.at(-1),{method:'edit',value:command});
+   const e=new f.dom.window.KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true,...extra});const before=f.calls.length;d.dispatchEvent(e);assert(!e.defaultPrevented);assert.equal(f.calls.length,before);
   }
   for(const values of [{key:'Enter'},{key:'x'},{key:'v',ctrlKey:true,altKey:true},{key:'Process',isComposing:true,ctrlKey:true}]){
    const e=new f.dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,...values});d.dispatchEvent(e);assert(!e.defaultPrevented);

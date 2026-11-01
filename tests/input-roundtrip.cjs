@@ -4,14 +4,14 @@ const {spawn}=require('node:child_process');
 const {clipboard}=require('electron');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 module.exports=async function inputRoundtrip(w){
- const wc=w.webContents;clipboard.writeText('clipboard baseline');if(clipboard.readText()!=='clipboard baseline')throw Error('Test clipboard unavailable');const keys=[];wc.on('before-input-event',(_e,input)=>keys.push({key:input.key,type:input.type,ctrl:input.control}));
+ const wc=w.webContents;await clipboard.writeText('clipboard baseline');if(await clipboard.readText()!=='clipboard baseline')throw Error('Test clipboard unavailable');const keys=[];wc.on('before-input-event',(_e,input)=>keys.push({key:input.key,type:input.type,ctrl:input.control}));
  await wc.executeJavaScript(`(()=>{const box=document.createElement('textarea');box.id='cb-test-input';box.style.cssText='position:fixed;left:30px;top:160px;width:320px;height:100px;z-index:2147483647';document.body.append(box);box.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();box.dataset.sent=box.value;}});box.focus();})()`);
  wc.focus();await delay(150);
  const key=keys=>new Promise((resolve,reject)=>{const p=spawn('powershell.exe',['-NoProfile','-NonInteractive','-Command',"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('"+keys+"')"],{windowsHide:true,stdio:'ignore'});p.on('error',reject);p.on('exit',code=>code===0?resolve():reject(Error('OS keyboard injection failed')));});
  const wait=async(expression,expected)=>{const until=Date.now()+5000;while(await wc.executeJavaScript(expression)!==expected){if(Date.now()>until)throw Error('Keyboard roundtrip failed: '+expression);await delay(50);}};
  await key('bridge');await wait("document.querySelector('#cb-test-input').value",'bridge');
- await key('^a');await key('^c');const until=Date.now()+5000;while(clipboard.readText()!=='bridge'){if(Date.now()>until)throw Error('Ctrl+C did not copy: '+JSON.stringify({keys,clipboard:clipboard.readText(),webFocused:wc.isFocused(),windowFocused:w.isFocused?.(),selection:await wc.executeJavaScript("JSON.stringify({start:document.querySelector('#cb-test-input').selectionStart,end:document.querySelector('#cb-test-input').selectionEnd,focus:document.hasFocus()})")}));await delay(50);}
- clipboard.writeText('paste fixture');await key('^v');await wait("document.querySelector('#cb-test-input').value",'paste fixture');
+ await key('^a');await key('^c');const until=Date.now()+5000;while(await clipboard.readText()!=='bridge'){if(Date.now()>until)throw Error('Ctrl+C did not copy: '+JSON.stringify({keys,clipboard:await clipboard.readText(),webFocused:wc.isFocused(),windowFocused:w.isFocused?.(),selection:await wc.executeJavaScript("JSON.stringify({start:document.querySelector('#cb-test-input').selectionStart,end:document.querySelector('#cb-test-input').selectionEnd,focus:document.hasFocus()})")}));await delay(50);}
+ await clipboard.writeText('paste fixture');await key('^v');await wait("document.querySelector('#cb-test-input').value",'paste fixture');
  await key('{ENTER}');await wait("document.querySelector('#cb-test-input').dataset.sent",'paste fixture');
  await wc.executeJavaScript("document.querySelector('#cb-test-input').remove()");
 };
