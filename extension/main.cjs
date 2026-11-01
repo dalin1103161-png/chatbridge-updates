@@ -56,7 +56,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const allowed = new Set([window.webContents.id]);
   if(native)allowed.add(native.defaultWebContents.id);
   let activeId = null;
-  const focusWhatsApp=id=>{const view=views.get(id);if(view){window.focus?.();view.webContents.focus?.();}};
+  const focusWhatsApp=async id=>{const view=views.get(id);if(!view)return;view.webContents.blur?.();if(native)await native.focusHost();if(activeId!==id||view.webContents.isDestroyed())return;window.focus?.();view.webContents.focus?.();};
   window.on('chatbridge:chat-hidden',()=>{if(activeId!==null)focusWhatsApp(activeId);});
   const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
   const warmupTimer=setTimeout(()=>{if(translator.warmup)translator.warmup().catch(()=>{});},1500);warmupTimer.unref();
@@ -112,7 +112,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       } });
       views.set(account.id, view);
       allowed.add(view.webContents.id);
-      bindInput(view.webContents,window);
+      bindInput(view.webContents,{focus:()=>{focusWhatsApp(account.id).catch(()=>{});}});
       attachZoom(view.webContents,'whatsapp',account.id);
       window.contentView.addChildView(view);
       view.setVisible(false);

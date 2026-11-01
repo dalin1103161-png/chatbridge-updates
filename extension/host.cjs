@@ -69,7 +69,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
    if(quit)app.quit();
   })();return stopping;
  };
- const controller={host,shutdown,setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
+ const controller={host,shutdown,focusHost(){if(!ready||closed)return Promise.resolve(false);return new Promise(resolve=>{const id=++sequence;const timer=setTimeout(()=>{pending.delete(id);resolve(false);},2000);pending.set(id,{complete:m=>{clearTimeout(timer);resolve(!m.error);}});worker.stdin.write(JSON.stringify({id,focusHost:true,window:hwnd(host),pid:process.pid})+'\n');});},setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   async open(id){active=id;if(id==='default'||windows.has(id)){layout();return;}await listening;
    if(!children.has(id)){const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
     const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});}
