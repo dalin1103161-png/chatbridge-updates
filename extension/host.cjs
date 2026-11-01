@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use strict';
+const {bindInput,edit}=require('./input.cjs');
 const path=require('node:path');const net=require('node:net');const crypto=require('node:crypto');const readline=require('node:readline');const {spawn}=require('node:child_process');
 const hwnd=w=>{const b=w.getNativeWindowHandle();return (b.length===8?b.readBigUInt64LE():BigInt(b.readUInt32LE())).toString();};
 function createNativeWorkspace(signalWindow,rootDir,electron){
@@ -25,7 +26,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
   if(!record?.attached||closed)return;
   const visible=record.id===active&&!suspended;
   if(record.electronVisible===visible)return;record.electronVisible=visible;
-  if(record.id==='default'){if(visible)originalShow();else originalHide();}
+  if(record.id==='default'){if(visible){originalShow();signalWindow.webContents.focus();}else originalHide();}
   else {const client=[...clients].find(c=>c.chatbridgeProfile===record.id);if(client&&!client.destroyed)client.write(JSON.stringify({visibility:visible})+'\n');}
  };
  const attach=(id,handle,pid)=>{windows.set(id,{id,hwnd:handle,pid,attached:false});layout();};
@@ -78,7 +79,7 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
  return controller;
 }
 function installManagedSignal(window,electron){
- const {ipcMain,app}=electron;window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
+ const {ipcMain,app}=electron;bindInput(window.webContents);window.setSkipTaskbar(true);window.setMenuBarVisibility(false);window.hide();
  const originalShow=window.show.bind(window),originalHide=window.hide.bind(window);window.webContents.setBackgroundThrottling(false);
  let electronVisible=false;
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);
@@ -86,11 +87,12 @@ function installManagedSignal(window,electron){
  window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
- readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility)originalShow();else originalHide();}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
+ readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility){originalShow();window.webContents.focus();}else originalHide();}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
  const request=(method,value)=>connected.then(()=>new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');}));
  const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value));
  ipcMain.handle('chatbridge:invoke',(event,method,value)=>{
-  if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom'].includes(method))throw Error('Unsupported child request');
+  if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom','edit'].includes(method))throw Error('Unsupported child request');
+  if(method==='edit')return edit(event.sender,value);
   return method==='chat-zoom'?applyZoom(value):request(method,value);
  });
 }

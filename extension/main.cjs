@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {zoomState,bindZoom}=require('./zoom.cjs');
+const {bindInput,edit}=require('./input.cjs');
 
 function validTranslation(value) {
   if (!value || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 10000 || !['en', 'zh-Hans'].includes(value.target)) {
@@ -80,6 +81,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     return state;
   };
   const attachZoom=(contents,platform,id)=>zoomBindings.set(contents.id,bindZoom(contents,value=>accountZoom(platform,id,value)));
+  bindInput(window.webContents);
+  if(native)bindInput(native.defaultWebContents);
   attachZoom(native?.defaultWebContents||window.webContents,'signal',currentProfile);
   const updateTitle = () => window.setTitle?.(config.windowTitle || 'ChatBridge');
   updateTitle();
@@ -95,6 +98,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     for (const [mid, view] of views) view.setVisible(mid === id);
     window.webContents.send('chatbridge:active', id);
     bounds();
+    if(id!==null)views.get(id)?.webContents.focus?.();
   }
   function openWhatsApp(account) {
     if (!views.has(account.id)) {
@@ -106,6 +110,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       } });
       views.set(account.id, view);
       allowed.add(view.webContents.id);
+      bindInput(view.webContents);
       attachZoom(view.webContents,'whatsapp',account.id);
       window.contentView.addChildView(view);
       view.setVisible(false);
@@ -134,6 +139,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   };
   const handleRequest = async (event, method, value) => {
     authorized(event);
+    if(method==='edit')return edit(event.sender,value);
     if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
       validTranslation(value);

@@ -96,3 +96,6 @@ Signal 官方历史同步说明：https://support.signal.org/hc/en-us/articles/3
 ## 聊天内容缩放
 
 WhatsApp 和 Signal 聊天工具栏增加“− / 百分比 / ＋”。范围 50%–200%，点击百分比恢复 100%。支持 Ctrl+加减号、Ctrl+0 和 Ctrl+鼠标滚轮。缩放使用 Electron 独立页面缩放，不改变外层账号栏与主页布局；每个账号的比例单独保存在本地设置中，重新打开时恢复。
+
+### Embedded keyboard input
+Chat pages claim keyboard focus on activation and mouse down. Editing shortcuts are bound to the focused renderer and invoke only its native edit commands; they do not use the original Signal window's menu target. Enter and ordinary typing remain native to WhatsApp/Signal. Windows isolated fixture checks type, Ctrl+A/C/V and Enter via OS SendKeys in embedded Signal processes and a WebContentsView.
