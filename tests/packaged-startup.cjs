@@ -45,8 +45,9 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
   if(!loaded&&client){const attempt=await client.call('Runtime.evaluate',{expression:`(()=>{try{window.startApp();return 'startApp called';}catch(e){return e.stack;}})()`,returnByValue:true});fs.writeFileSync(path.join(output,'start-attempt.json'),JSON.stringify(attempt,null,2));}
   if(loaded&&client){
    const evaluate=async expression=>{const r=await client.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Zoom evaluation failed: '+(r.exceptionDetails.exception?.description||r.exceptionDetails.text));return r.result.value;};
-   const hostEval=async expression=>{const r=await homeClient.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.text);return r.result.value;};
-   await hostEval(`document.querySelector('[aria-label="Settings"]').onclick()`);
+   const hostEval=async expression=>{const r=await homeClient.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+   await hostEval(`document.querySelector('[aria-label="Settings"]').click()`);
+   const settingsDeadline=Date.now()+5000;while(!await hostEval(`!!document.querySelector('[data-cb-zoom-reset]')&&!document.querySelector('[data-cb-zoom-reset]').disabled`)){if(Date.now()>settingsDeadline)throw Error('Settings zoom did not load');await delay(50);}
    const zoom=()=>hostEval(`Number(document.querySelector('[data-cb-zoom-reset]').textContent.replace('%',''))`);
    if(await evaluate(`document.querySelector('#app-container').getBoundingClientRect().top`)!==0)throw Error('Removed chat toolbar still reserves space');
    console.log('PACKAGED_NO_CHAT_TOOLBAR_PASS');
