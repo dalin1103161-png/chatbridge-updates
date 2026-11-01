@@ -1,0 +1,61 @@
+name: Verify existing packaged chat zoom
+on:
+  push:
+    branches: [fixed-workspace]
+    paths:
+      - .github/workflows/verify-packaged-zoom.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Require identical application sources
+        shell: pwsh
+        run: |
+          $changed = git diff --name-only ea2a38dbad32489873cce0071563d2e0d0ce721d HEAD -- extension prepare_source.py local_translate package.json package-lock.json
+          if ($changed) { throw 'Application sources changed; rebuild before reusing an installer' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: ChatBridge-startup-test-installer
+          run-id: 41260369267
+          github-token: ${{ github.token }}
+          path: existing-installer
+      - name: Extract the existing application without modifying account data
+        shell: pwsh
+        run: |
+          7z x existing-installer/ChatBridge-Setup.exe -oexisting-installer/unpacked -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Installer extraction failed' }
+          $archive = Get-ChildItem existing-installer/unpacked -Recurse -Filter 'app-64.7z' | Select-Object -First 1
+          if (-not $archive) { throw 'Application archive missing' }
+          7z x $archive.FullName -osignal-source/release/win-unpacked -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Application extraction failed' }
+          if (-not (Test-Path signal-source/release/win-unpacked/ChatBridge.exe)) { throw 'Application executable missing' }
+      - name: Verify rendered zoom and saved scale across two starts
+        shell: pwsh
+        run: |
+          $env:CHATBRIDGE_STARTUP_LABEL = 'first-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'First zoom verification failed' }
+          $env:CHATBRIDGE_STARTUP_LABEL = 'second-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Second zoom verification failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ChatBridge-zoom-verification-diagnostics
+          path: startup-diagnostics/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-Zoom-Verified-Installer
+          path: existing-installer/ChatBridge-Setup.exe
+          if-no-files-found: error
