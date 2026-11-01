@@ -3,7 +3,7 @@
 
 function installPreload(options = {}) {
   const ipc = options.ipc || require('electron').ipcRenderer;
-  const signalContent = process.argv.includes('--chatbridge-signal-content');
+  const signalContent = options.signalContent ?? process.argv.includes('--chatbridge-signal-content');
   const wa = options.whatsapp ?? process.argv.includes('--chatbridge-whatsapp');
   if (globalThis.__chatbridgeInstalled) return;
   globalThis.__chatbridgeInstalled = true;
@@ -203,6 +203,19 @@ function installPreload(options = {}) {
       make('button','复制译文 / Copy',form).onclick=async()=>{if(await invoke('copy',output.value,report))report.textContent='已复制，请核对后粘贴发送 / Copied';};
       make('button',words[prefs.language].close,form).onclick=()=>overlay.remove();
     };
+    if(wa||signalContent){
+      const group=make('div',null,controls);group.dataset.cbZoom='1';group.style.cssText='display:flex;gap:3px;align-items:center;flex-shrink:0;';controls.prepend(group);
+      const less=make('button','−',group),reset=make('button','100%',group),more=make('button','＋',group);
+      less.title='缩小聊天内容 · Ctrl+-';less.setAttribute('aria-label','缩小聊天内容');less.dataset.cbZoomOut='1';
+      more.title='放大聊天内容 · Ctrl++';more.setAttribute('aria-label','放大聊天内容');more.dataset.cbZoomIn='1';
+      reset.title='恢复 100% · Ctrl+0';reset.dataset.cbZoomReset='1';
+      for(const b of [less,reset,more])b.style.cssText='padding:5px 8px;min-width:30px;';
+      const display=value=>{if(!value||!Number.isInteger(value.percent))return;reset.textContent=value.percent+'%';less.disabled=value.percent<=value.min;more.disabled=value.percent>=value.max;};
+      const change=async action=>{const result=await invoke('chat-zoom',{action},status);if(result)display(result);};
+      less.onclick=()=>change('out');more.onclick=()=>change('in');reset.onclick=()=>change('reset');
+      if(ipc.on){ipc.on('chatbridge:zoom',(_e,value)=>display(value));ipc.on('chatbridge:zoom-error',(_e,message)=>{if(status)status.textContent=message;});}
+      call('chat-zoom').then(display).catch(()=>{});
+    }
     target=make('select',null,controls);target.setAttribute('aria-label','译文语言 / Translation language');make('option','中文',target).value='zh-Hans';make('option','English',target).value='en';target.onchange=scan;
     if(document.querySelector('[data-chatbridge-home]'))controls.style.display='none';
     status=label('span','ready',controls);status.style.cssText='font-size:11px;color:var(--cb-muted);min-width:80px;';status.setAttribute('role','status');

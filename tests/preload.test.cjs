@@ -2,18 +2,19 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),{JSDOM}=require('jsdom');
 const {installPreload}=require('../extension/preload.cjs');
-function fixture(whatsapp=false,html,translation){
+function fixture(whatsapp=false,html,translation,signalContent=false){
  const dom=new JSDOM(html||'<!doctype html><body><div class="module-ConversationHeader__header__info__title">Friend</div><div data-message-id="old"><span class="module-message__text">Hello from history</span></div></body>',{url:'https://fixture.invalid'});
  const old={document:global.document,interval:global.setInterval,installed:global.__chatbridgeInstalled};global.document=dom.window.document;global.setInterval=()=>1;delete global.__chatbridgeInstalled;
- const calls=[];const ipc={invoke:async(_channel,method,value)=>{
+ let percent=100;const calls=[];const ipc={invoke:async(_channel,method,value)=>{
   calls.push({method,value});
+  if(method==='chat-zoom'){if(value)percent=value.action==='reset'?100:Math.max(50,Math.min(200,percent+(value.action==='in'?10:-10)));return {percent,min:50,max:200};}
   if(method==='accounts')return [{id:'wa-one',name:'Work WA'},{id:'wa-two',name:'Personal WA'}];
   if(method==='signal-accounts')return {accounts:[{id:'default',name:'Signal Work'}],current:'default'};
   if(method==='add-whatsapp')return {id:'test-account',name:value};
   if(method==='translate')return translation?translation(value):'<b>译文作为纯文字</b>';
   return true;
  }};
- const api=installPreload({ipc,whatsapp});dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+ const api=installPreload({ipc,whatsapp,signalContent});dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
  return {dom,api,calls,async close(){await api.state.serial;global.document=old.document;global.setInterval=old.interval;global.__chatbridgeInstalled=old.installed;dom.window.close();}};
 }
 const requests=f=>f.calls.filter(x=>x.method==='translate');
@@ -99,4 +100,9 @@ test('sidebar drag clamps width, saves on release and supports reset and keyboar
   assert.equal(d.documentElement.style.getPropertyValue('--cb-sidebar-width'),'104px');assert(f.calls.some(c=>c.method==='sidebar-width'&&c.value?.width===104&&c.value.persist===true));
   resize.onkeydown({key:'Home',preventDefault(){}});assert.equal(resize.getAttribute('aria-valuenow'),'88');resize.onkeydown({key:'End',preventDefault(){}});assert.equal(resize.getAttribute('aria-valuenow'),'320');resize.ondblclick();assert.equal(resize.getAttribute('aria-valuenow'),'144');
  }finally{await f.close();}
+});
+
+
+test('chat toolbar zoom controls show percent and support enlarge, shrink and reset',async()=>{
+ const f=fixture(false,undefined,undefined,true);try{await f.api.state.serial;await new Promise(r=>setImmediate(r));const d=f.dom.window.document,reset=d.querySelector('[data-cb-zoom-reset]');assert(reset);assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();assert.equal(reset.textContent,'110%');await d.querySelector('[data-cb-zoom-out]').onclick();assert.equal(reset.textContent,'100%');await d.querySelector('[data-cb-zoom-in]').onclick();await reset.onclick();assert.equal(reset.textContent,'100%');assert.equal(d.querySelectorAll('[data-chatbridge-bar] input[type=checkbox]').length,0);}finally{await f.close();}
 });

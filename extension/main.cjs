@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const {zoomState,bindZoom}=require('./zoom.cjs');
 
 function validTranslation(value) {
   if (!value || typeof value.text !== 'string' || !value.text.trim() || value.text.length > 10000 || !['en', 'zh-Hans'].includes(value.target)) {
@@ -71,6 +72,15 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     fs.writeFileSync(temp, JSON.stringify(config), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(temp, filename);
   };
+  const zoomBindings=new Map();
+  const savedZoom=config.chatZoom&&typeof config.chatZoom==='object'&&!Array.isArray(config.chatZoom)?config.chatZoom:{};
+  const accountZoom=(platform,id,value)=>{
+    const key=platform+':'+id,state=zoomState(savedZoom[key],value);
+    if(value!==undefined&&savedZoom[key]!==state.percent){savedZoom[key]=state.percent;config.chatZoom=savedZoom;save();}
+    return state;
+  };
+  const attachZoom=(contents,platform,id)=>zoomBindings.set(contents.id,bindZoom(contents,value=>accountZoom(platform,id,value)));
+  attachZoom(native?.defaultWebContents||window.webContents,'signal',currentProfile);
   const updateTitle = () => window.setTitle?.(config.windowTitle || 'ChatBridge');
   updateTitle();
   window.webContents.on?.('page-title-updated', event => { if (config.windowTitle) { event.preventDefault(); updateTitle(); } });
@@ -96,6 +106,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       } });
       views.set(account.id, view);
       allowed.add(view.webContents.id);
+      attachZoom(view.webContents,'whatsapp',account.id);
       window.contentView.addChildView(view);
       view.setVisible(false);
       const ua = view.webContents.getUserAgent().replace(/\b(?:Electron|ChatBridge|Signal)\/[^\s]+\s*/g, '');
@@ -123,6 +134,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   };
   const handleRequest = async (event, method, value) => {
     authorized(event);
+    if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
       validTranslation(value);
       return translator.translate(value.text, value.target);
@@ -170,7 +182,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
         const index = config.accounts.findIndex(a => a.id === value.id); if (index < 0) throw new Error('未知账号。');
         config.accounts.splice(index, 1); save();
         const view = views.get(value.id);
-        if (view) { allowed.delete(view.webContents.id); window.contentView.removeChildView?.(view); if (!view.webContents.isDestroyed()) view.webContents.close(); views.delete(value.id); }
+        if (view) { allowed.delete(view.webContents.id); zoomBindings.delete(view.webContents.id); window.contentView.removeChildView?.(view); if (!view.webContents.isDestroyed()) view.webContents.close(); views.delete(value.id); }
         unread.delete(value.id); if (activeId === value.id) show(null);
       } else {
         const account = signalAccounts().find(a => a.id === value.id); if (!account) throw new Error('未知账号。');
@@ -216,7 +228,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     throw new Error('未知请求。');
   };
   ipcMain.handle('chatbridge:invoke',handleRequest);
-  if(native)native.setRPC((method,value)=>handleRequest({sender:{id:window.webContents.id}},method,value));
+  if(native)native.setRPC((method,value,profile)=>{if(method==='chat-zoom'){if(!signalAccounts().some(a=>a.id===profile))throw Error('未知 Signal 账号。');return accountZoom('signal',profile,value);}return handleRequest({sender:{id:window.webContents.id}},method,value);});
   window.on('resize', bounds);
   let updateTimer;
   if (updater) { updater.check(); updateTimer=setInterval(()=>updater.check(),6*60*60*1000);updateTimer.unref(); }
@@ -224,7 +236,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(updateTimer)clearInterval(updateTimer);
     ipcMain.removeHandler('chatbridge:invoke');
     for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
-    clearTimeout(warmupTimer);allowed.clear(); views.clear(); translator.close();
+    clearTimeout(warmupTimer);allowed.clear(); views.clear(); zoomBindings.clear(); translator.close();
   });
   return { show, views };
 }

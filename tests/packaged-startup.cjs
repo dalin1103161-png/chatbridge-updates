@@ -40,6 +40,26 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
   }
   fs.writeFileSync(path.join(output,'startup.json'),JSON.stringify({last,events:client?.events},null,2));
   if(!loaded&&client){const attempt=await client.call('Runtime.evaluate',{expression:`(()=>{try{window.startApp();return 'startApp called';}catch(e){return e.stack;}})()`,returnByValue:true});fs.writeFileSync(path.join(output,'start-attempt.json'),JSON.stringify(attempt,null,2));}
+  if(loaded&&client){
+   const evaluate=async expression=>{const r=await client.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Zoom evaluation failed');return r.result.value;};
+   const zoom=()=>evaluate(`Number(document.querySelector('[data-cb-zoom-reset]').textContent.replace('%',''))`);
+   const waitZoom=async expected=>{const deadline=Date.now()+5000;while(await zoom()!==expected){if(Date.now()>deadline)throw Error('Zoom did not reach '+expected);await delay(50);}};
+   const initial=await zoom();console.log('PACKAGED_ZOOM_INITIAL',initial);
+   if(initial!==(process.env.CHATBRIDGE_STARTUP_LABEL==='second-launch'?110:100))throw Error('Saved chat zoom did not restore');
+   const hostBefore=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
+   const restoredDpr=await evaluate('devicePixelRatio');if(Math.abs(restoredDpr/JSON.parse(hostBefore.result.value).dpr-initial/100)>0.03)throw Error('Saved zoom label did not match the rendered scale');
+   await evaluate(`document.querySelector('[data-cb-zoom-reset]').onclick()`);await waitZoom(100);const baseDpr=await evaluate('devicePixelRatio');
+   await evaluate(`document.querySelector('[data-cb-zoom-in]').onclick()`);await waitZoom(110);const zoomDpr=await evaluate('devicePixelRatio');if(Math.abs(zoomDpr/baseDpr-1.1)>0.03)throw Error('Content did not enlarge');
+   await evaluate(`document.querySelector('[data-cb-zoom-out]').onclick()`);await waitZoom(100);
+   await client.call('Input.dispatchKeyEvent',{type:'keyDown',key:'+',code:'Equal',modifiers:2});await client.call('Input.dispatchKeyEvent',{type:'keyUp',key:'+',code:'Equal',modifiers:2});await waitZoom(110);
+   await client.call('Input.dispatchKeyEvent',{type:'keyDown',key:'0',code:'Digit0',modifiers:2});await client.call('Input.dispatchKeyEvent',{type:'keyUp',key:'0',code:'Digit0',modifiers:2});await waitZoom(100);
+   await client.call('Input.dispatchMouseEvent',{type:'mouseWheel',x:180,y:160,deltaX:0,deltaY:-120,modifiers:2});
+   const wheelDeadline=Date.now()+5000;while(await zoom()===100){if(Date.now()>wheelDeadline)throw Error('Ctrl+wheel did not change chat zoom');await delay(50);}
+   await evaluate(`document.querySelector('[data-cb-zoom-reset]').onclick()`);await waitZoom(100);await evaluate(`document.querySelector('[data-cb-zoom-in]').onclick()`);await waitZoom(110);
+   const hostAfter=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
+   if(hostAfter.result.value!==hostBefore.result.value)throw Error('Chat zoom changed the outer workspace');
+   console.log('PACKAGED_CHAT_ZOOM_PASS: buttons, Ctrl shortcuts, mouse wheel and independent workspace scale');
+  }
   if(client){const shot=await client.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-login.png'),Buffer.from(shot.data,'base64'));}
   if(!homeVerified)throw Error('Packaged homepage did not become ready');
   if(!loaded)throw Error('Packaged Signal login did not become visible: '+JSON.stringify(last));

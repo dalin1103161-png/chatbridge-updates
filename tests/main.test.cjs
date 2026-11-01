@@ -12,7 +12,7 @@ function fixture() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'chatbridge-'));
   const win = new EventEmitter();
   const actions = [];
-  win.webContents = { id: 1, send: (...args) => actions.push(args) };
+  win.webContents = Object.assign(new EventEmitter(),{ id: 1, send: (...args) => actions.push(args),setZoomFactor:factor=>win.zoomFactor=factor,isDestroyed:()=>false });
   win.getContentSize = () => [1100, 800];
   win.contentView = { addChildView: () => {} };
   let handler, counter = 100;
@@ -24,7 +24,7 @@ function fixture() {
       Object.assign(this.webContents, {
         id: counter++, getUserAgent: () => 'Mozilla/5.0 Chrome/140.0 Electron/39.0 ChatBridge/8.33.0',
         setUserAgent: ua => this.ua = ua, setWindowOpenHandler: () => {}, loadURL: url => this.url = url,
-        isDestroyed: () => false, close: () => {}, send: () => {},
+        isDestroyed: () => false, close: () => {}, send: () => {},setZoomFactor:factor=>this.zoomFactor=factor,
       });
     }
     setVisible(value) { this.visible = value; }
@@ -140,5 +140,19 @@ test('sidebar width repositions WhatsApp views, persists on release and rejects 
   await f.invoke('sidebar-width',{width:112,persist:true});assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).sidebarWidth,112);
   for(const width of [0,87,321,112.5])await assert.rejects(f.invoke('sidebar-width',{width,persist:true}),/无效/);
   await assert.rejects(f.invoke('sidebar-width',{width:100,persist:true},f.instance.views.get(a.id).webContents.id),/顶部/);
+ }finally{f.close();}
+});
+
+
+test('chat zoom changes content scale per account, validates actions and persists preferences',async()=>{
+ const f=fixture();try{
+  const a=await f.invoke('add-whatsapp','A'),b=await f.invoke('add-whatsapp','B');const va=f.instance.views.get(a.id),vb=f.instance.views.get(b.id);
+  assert.equal((await f.invoke('chat-zoom',undefined,va.webContents.id)).percent,100);
+  await f.invoke('chat-zoom',{action:'in'},va.webContents.id);assert.equal(va.zoomFactor,1.1);assert.equal((await f.invoke('chat-zoom',undefined,vb.webContents.id)).percent,100);
+  await f.invoke('chat-zoom',{action:'out'});assert.equal(f.win.zoomFactor,0.9);
+  const stored=JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).chatZoom;assert.equal(stored['whatsapp:'+a.id],110);assert.equal(stored['signal:default'],90);
+  await assert.rejects(f.invoke('chat-zoom',{action:'invalid'},va.webContents.id),/无效/);
+  await assert.rejects(f.invoke('chat-zoom',{action:'in'},999),/权限/);
+  await f.invoke('chat-zoom',{action:'reset'},va.webContents.id);assert.equal(va.zoomFactor,1);
  }finally{f.close();}
 });

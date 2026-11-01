@@ -39,8 +39,8 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
   lines.on('line',async line=>{if(line.length>50000){socket.destroy();return;}try{const m=JSON.parse(line);
    if(!authenticated){const child=children.get(m.profile);if(m.token!==token||!child||child.pid!==m.pid||!/^\d+$/.test(m.hwnd)){socket.destroy();return;}authenticated=true;profile=m.profile;socket.chatbridgeProfile=profile;attach(profile,m.hwnd,m.pid);return;}
    if(m.shown){const record=windows.get(profile);if(record)command(record);return;}
-   if(!['translate','copy','preferences'].includes(m.method))throw Error('Unsupported child request');
-   const result=await rpc(m.method,m.value);if(!socket.destroyed)socket.write(JSON.stringify({id:m.id,result})+'\n');
+   if(!['translate','copy','preferences','chat-zoom'].includes(m.method))throw Error('Unsupported child request');
+   const result=await rpc(m.method,m.value,profile);if(!socket.destroyed)socket.write(JSON.stringify({id:m.id,result})+'\n');
   }catch(e){let id=0;try{id=JSON.parse(line).id;}catch{}if(authenticated&&!socket.destroyed)socket.write(JSON.stringify({id,error:e.message})+'\n');}});
   socket.on('error',()=>{});socket.on('close',()=>{if(profile){windows.delete(profile);children.delete(profile);}});
  });
@@ -82,11 +82,16 @@ function installManagedSignal(window,electron){
  const originalShow=window.show.bind(window),originalHide=window.hide.bind(window);window.webContents.setBackgroundThrottling(false);
  let electronVisible=false;
  let seq=0;const waiting=new Map();const socket=net.connect(process.env.CHATBRIDGE_HOST_PIPE);
- socket.once('connect',()=>socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n'));
+ const connected=new Promise((resolve,reject)=>{socket.once('connect',()=>{socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n');resolve();});socket.once('error',reject);socket.once('close',()=>reject(Error('账号连接已关闭。')));});connected.catch(()=>{});
  window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
  readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility)originalShow();else originalHide();}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
- ipcMain.handle('chatbridge:invoke',(event,method,value)=>{if(event.sender.id!==window.webContents.id||!['translate','copy','preferences'].includes(method))throw Error('Unsupported child request');return new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');});});
+ const request=(method,value)=>connected.then(()=>new Promise((resolve,reject)=>{const id=++seq;waiting.set(id,{resolve,reject});socket.write(JSON.stringify({id,method,value})+'\n');}));
+ const applyZoom=require('./zoom.cjs').bindZoom(window.webContents,value=>request('chat-zoom',value));
+ ipcMain.handle('chatbridge:invoke',(event,method,value)=>{
+  if(event.sender.id!==window.webContents.id||!['translate','copy','preferences','chat-zoom'].includes(method))throw Error('Unsupported child request');
+  return method==='chat-zoom'?applyZoom(value):request(method,value);
+ });
 }
 module.exports={createNativeWorkspace,installManagedSignal};
