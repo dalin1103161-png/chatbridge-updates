@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const adapters=require('./adapters.cjs'),{createStore,profile,label}=require('./store.cjs'),environment=require('./profile.cjs');
 const proxy=require('../proxy.cjs'),{bindInput}=require('../input.cjs'),{bindContextMenu}=require('../context-menu.cjs'),{bindZoom,zoomState}=require('../zoom.cjs'),{titleUnread,validCount,whatsappUnreadScript}=require('../unread.cjs');
 function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOtherViews=()=>{},focusHost=()=>{},allowWhatsApp=()=>{},releaseWhatsApp=()=>{},notify=()=>{},notifications=()=>true,lookupProxy}){
- const store=createStore(root,adapters),runtime=new Map(),waContents=new Map();let active=null,disposed=false,queue=Promise.resolve(),restored=false;
+ const store=createStore(root,adapters),runtime=new Map(),waContents=new Map();let active=null,disposed=false,queue=Promise.resolve(),restored=false,generation=0;
  const envRuntime=key=>{if(!runtime.has(key))runtime.set(key,{accounts:new Map(),tabs:new Map(),network:null,state:'idle',message:''});return runtime.get(key);};
  const cleanAgent=value=>value.replace(/\b(?:Electron|ChatBridge|Signal)\/[^\s]+\s*/g,'');
  const systemLanguage=electron.app.getPreferredSystemLanguages?.()[0]||electron.app.getLocale?.()||'en-US';
@@ -13,7 +13,7 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
  function layout(){const [width,height]=window.getContentSize();const left=sidebarWidth();for(const r of runtime.values())for(const {view}of r.tabs.values())if(!view.webContents.isDestroyed())view.setBounds({x:left,y:88,width:Math.max(1,width-left),height:Math.max(1,height-88)});}
  function visibility(){if(window.isDestroyed?.())return;const selected=active?store.get(active).activeTab:null;for(const [key,r]of runtime)for(const [id,t]of r.tabs)t.view.setVisible(key===active&&id===selected&&r.state!=='blocked'&&t.loaded===true);layout();}
  function focus(){if(!active)return;const key=active,tab=store.get(key).activeTab;const wc=runtime.get(key)?.tabs.get(tab)?.view.webContents;if(!wc||wc.isDestroyed())return;Promise.resolve(focusHost()).then(()=>{if(active===key&&store.get(key).activeTab===tab&&!wc.isDestroyed()){window.focus?.();wc.focus?.();}}).catch(()=>{});}
- function hide({remember=false}={}){if(active===null)return;active=null;if(!remember)store.select(null);visibility();emit();}
+ function hide({remember=false}={}){generation++;if(active===null)return;active=null;if(!remember)store.select(null);visibility();emit();}
  function pause(key,message){const r=envRuntime(key);r.state='blocked';r.message=message;for(const a of r.accounts.values()){a.controller.block();a.session.closeAllConnections().catch(()=>{});}for(const t of r.tabs.values())if(!t.view.webContents.isDestroyed())t.view.webContents.stop?.();visibility();emit();}
  function disposeView(t){const wc=t.view.webContents;if(waContents.has(t.wcId)){waContents.delete(t.wcId);releaseWhatsApp(t.wcId);}if(!window.isDestroyed?.())window.contentView.removeChildView?.(t.view);if(!wc.isDestroyed())wc.close();}
  function disposeRuntime(key){const r=runtime.get(key);if(!r)return;runtime.delete(key);for(const t of r.tabs.values())disposeView(t);for(const a of r.accounts.values()){a.controller.block();if(!a.anchor.webContents.isDestroyed())a.anchor.webContents.close();a.session.closeAllConnections().catch(()=>{});}}
@@ -45,14 +45,14 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
   wc.on('will-navigate',(event,url)=>{try{adapter.url(url);}catch{event.preventDefault();}});
   wc.on('will-redirect',(event,url)=>{try{adapter.url(url);}catch{event.preventDefault();}});
   wc.on('login',(event,_details,info,cb)=>{if(!info.isProxy)return;event.preventDefault();if(e.proxy.enabled&&String(info.host).toLowerCase()===e.proxy.host.replace(/^\[|\]$/g,'').toLowerCase()&&Number(info.port)===e.proxy.port){try{const auth=proxy.credentials(e.proxy,electron.safeStorage);cb(auth.username,auth.password);}catch{cb();}}else cb();});
-  const remember=url=>{try{const u=adapter.url(url),current=store.get(key).tabs.find(t=>t.id===tabId);if(current&&u!==current.url){store.edit(key,v=>v.tabs.find(t=>t.id===tabId).url=u);emit();}}catch{}};
+  const remember=url=>{if(!t.loaded)return;try{const u=adapter.url(url),current=store.get(key).tabs.find(t=>t.id===tabId);if(current&&u!==current.url){store.edit(key,v=>v.tabs.find(t=>t.id===tabId).url=u);emit();}}catch{}};
   wc.on('did-navigate',(_e,url)=>remember(url));wc.on('did-navigate-in-page',(_e,url,isMainFrame)=>{if(isMainFrame)remember(url);});
   wc.on('page-title-updated',(_event,title)=>{t.title=String(title).slice(0,100);if(a.adapter==='whatsapp'&&!ar.authoritative){const count=titleUnread(t.title);if(count!==null)unreadCount(key,a.id,count);}emit();});
   wc.on('render-process-gone',()=>{if(runtime.get(key)===r)pause(key,'网站进程已退出，请刷新重试。');});
   if(a.adapter==='whatsapp'){waContents.set(wc.id,{key,accountId:a.id});allowWhatsApp(wc);}
   t.zoom=bindZoom(wc,value=>{const account=store.get(key).accounts.find(a=>a.id===tab.accountId),state=zoomState(account.zoom,value);if(value!==undefined)store.edit(key,v=>v.accounts.find(a=>a.id===tab.accountId).zoom=state.percent);return state;});
-  try{await wc.loadURL('about:blank');await environment.apply(wc,ar.effective,e.proxy.enabled);ar.geoReady.add(wc.id);wc.debugger.on('detach',()=>{if(runtime.get(key)===r&&r.tabs.get(tabId)===t&&!wc.isDestroyed())pause(key,'环境控制已断开，请刷新重试。');});await wc.loadURL(tab.url);t.loaded=true;r.state='ready';r.message='';visibility();emit();return t;}
-  catch{r.tabs.delete(tabId);ar.webContents.delete(t.wcId);ar.geoReady.delete(t.wcId);disposeView(t);if(runtime.get(key)===r)pause(key,'网站加载失败，连接已暂停。请检查代理后刷新。');throw Error('网站加载失败，请检查代理后刷新。');}
+  try{await wc.loadURL('about:blank');await environment.apply(wc,ar.effective,e.proxy.enabled,{languageOverride:e.profile.languageMode!=='system',userAgent:ar.userAgent});ar.geoReady.add(wc.id);wc.debugger.on('detach',()=>{if(runtime.get(key)===r&&r.tabs.get(tabId)===t&&!wc.isDestroyed())pause(key,'环境控制已断开，请刷新重试。');});await wc.loadURL(tab.url);t.loaded=true;remember(wc.getURL());r.state='ready';r.message='';visibility();emit();return t;}
+  catch(error){r.tabs.delete(tabId);ar.webContents.delete(t.wcId);ar.geoReady.delete(t.wcId);disposeView(t);if(runtime.get(key)===r)pause(key,'网站加载失败，连接已暂停。请检查代理后刷新。');throw Error('网站加载失败，请检查代理后刷新。',{cause:error});}
  }
  async function activate(key,tab){
   const e=store.get(key);if(tab!==undefined){if(!e.tabs.some(t=>t.id===tab))throw Error('标签页不存在。');store.edit(key,v=>v.activeTab=tab);}
@@ -91,7 +91,7 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
   if(op==='diagnose')return diagnose(key);
   throw Error('未知浏览器环境操作。');
  }
- function handle(v){if(v?.op==='list')return Promise.resolve(snapshot());const job=queue.then(()=>command(v));queue=job.catch(()=>{});return job;}
+ function handle(v){if(v?.op==='list')return Promise.resolve(snapshot());const token=generation;const job=queue.then(()=>{if(token!==generation)throw Error('已切换工作区。');return command(v);});queue=job.catch(()=>{});return job;}
  const poll=setInterval(()=>{for(const [key,r]of runtime){if(r.state!=='ready')continue;for(const [accountId,a]of r.accounts){if(a.sampling)continue;const t=[...r.tabs.values()].find(t=>t.loaded&&t.accountId===accountId&&waContents.has(t.view.webContents.id));if(!t||t.view.webContents.isDestroyed())continue;a.sampling=true;t.view.webContents.executeJavaScript(whatsappUnreadScript).then(count=>{if(runtime.get(key)===r&&validCount(count)){a.authoritative=true;unreadCount(key,accountId,count);}else a.authoritative=false;}).catch(()=>{a.authoritative=false;}).finally(()=>a.sampling=false);}}},2000);poll.unref?.();
  return {handle,layout,hide,focus,isActive:()=>active!==null,ownsWhatsApp:id=>waContents.has(id),reportUnread(id,count){const o=waContents.get(id);if(!o)return false;const a=runtime.get(o.key)?.accounts.get(o.accountId);return a?.authoritative===true||unreadCount(o.key,o.accountId,count);},preferences(p){for(const r of runtime.values())for(const t of r.tabs.values())if(waContents.has(t.view.webContents.id)&&!t.view.webContents.isDestroyed())t.view.webContents.send('chatbridge:preferences',p);},zoomFor(id,value){for(const r of runtime.values())for(const t of r.tabs.values())if(t.view.webContents.id===id)return t.zoom(value);throw Error('浏览器标签页不存在。');},close(){disposed=true;clearInterval(poll);for(const key of runtime.keys())disposeRuntime(key);}};
 }
