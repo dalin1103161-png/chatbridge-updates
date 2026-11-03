@@ -1,0 +1,40 @@
+name: Verify packaged browser environments
+on:
+  push:
+    branches: [browser-environment-package-check]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - name: Require the exact packaged application source
+        shell: pwsh
+        run: |
+          $changed = git diff --name-only f5628742d13c46a555ec9e56d9501011ce238452 HEAD -- extension prepare_source.py local_translate package.json package-lock.json
+          if ($changed) { throw 'Application sources changed; rebuild the installer before verification' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: ChatBridge-startup-test-installer
+          run-id: 41696265340
+          github-token: ${{ github.token }}
+          path: existing-installer
+      - name: Extract the installer for isolated verification
+        shell: pwsh
+        run: |
+          7z x existing-installer/ChatBridge-Setup.exe -oexisting-installer/unpacked -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Installer extraction failed' }
+          $archive = Get-ChildItem existing-installer/unpacked -Recurse -Filter 'app-64.7z' | Select-Object -First 1
+          if (-not $archive) { throw 'Application archive missing' }
+          7z x $archive.FullName -osignal-source/release/win-unpacked -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Application extraction failed' }
+      - name: Verify browser UI and persisted site state across executable restarts
+        run: node tests/browser-packaged-startup.cjs
