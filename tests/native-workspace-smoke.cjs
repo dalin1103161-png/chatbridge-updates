@@ -51,7 +51,7 @@ app.whenReady().then(async()=>{
   controller.hide();assert.equal(controller.snapshot().active,null);
   controller.close(b);assert(!controller.snapshot().windows.some(r=>r.id===b));
   console.log('NATIVE_WORKSPACE_SMOKE_PASS: three isolated processes attached to one parent; switching reuses windows');
-  await controller.shutdown(false);console.log('NATIVE_WORKSPACE_SHUTDOWN_PASS');await Promise.race([require('./proxy-smoke.cjs')(require('electron')),new Promise((_,reject)=>setTimeout(()=>reject(Error('Proxy fixture exceeded 60 seconds')),60000))]);app.exit(0);
+  await controller.shutdown(false);console.log('NATIVE_WORKSPACE_SHUTDOWN_PASS');await Promise.race([require('./proxy-smoke.cjs')(require('electron')),new Promise((_,reject)=>setTimeout(()=>reject(Error('Proxy fixture exceeded 60 seconds')),60000))]);await Promise.race([require('./browser-environment-smoke.cjs')(require('electron')),new Promise((_,reject)=>setTimeout(()=>reject(Error('Browser environment fixture exceeded 60 seconds')),60000))]);app.exit(0);
  }catch(e){console.error(e);await controller.shutdown(false);app.exit(1);}
 }).catch(e=>{console.error(e);app.exit(1);});
 

@@ -28,6 +28,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const spawn = suppliedElectron?.spawn || require('node:child_process').spawn;
   let updater;
   if (!suppliedElectron || native) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
+  let browserManager;
   const registryDir = path.join(app.getPath('appData'), 'ChatBridgeSignalAccounts');
   fs.mkdirSync(registryDir, { recursive: true });
   const currentProfile = process.env.CHATBRIDGE_SIGNAL_PROFILE || 'default';
@@ -42,6 +43,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     return result.filter(a => !fs.existsSync(path.join(registryDir, a.id + '.removed')));
   };
   const launchSignal = async id => {
+    browserManager?.hide();
     if(native){for(const view of views.values())view.setVisible(false);activeId=null;await native.open(id);window.webContents.send('chatbridge:signal-active',id);return;}
     if (id === currentProfile) { show(null); return; }
     const account = signalAccounts().find(a => a.id === id);
@@ -58,7 +60,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   if(native)allowed.add(native.defaultWebContents.id);
   let activeId = null;
   const focusWhatsApp=async id=>{const view=views.get(id);if(!view)return;window.webContents.focus?.();if(native&&!(await native.focusHost()))return;if(activeId!==id||view.webContents.isDestroyed())return;window.focus?.();view.webContents.focus?.();};
-  window.on('chatbridge:chat-hidden',()=>{if(activeId!==null)focusWhatsApp(activeId);});
+  window.on('chatbridge:chat-hidden',()=>{if(browserManager?.isActive())browserManager.focus();else if(activeId!==null)focusWhatsApp(activeId);});
   const translator = suppliedElectron?.localTranslator || require('./local-translator.cjs').createTranslator();
   const warmupTimer=setTimeout(()=>{if(translator.warmup)translator.warmup().catch(()=>{});},1500);warmupTimer.unref();
   let config = { accounts: [], preferences: { language: 'zh', theme: 'cyan', size: 'normal' } };
@@ -99,8 +101,10 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const bounds = () => {
     const [width, height] = window.getContentSize();
     for (const view of views.values()) view.setBounds({ x: sidebarWidth, y: 48, width: Math.max(1, width - sidebarWidth), height: Math.max(1, height - 48) });
+    browserManager?.layout();
   };
   function show(id) {
+    browserManager?.hide();
     activeId = id;
     if(native){if(id===null)native.open(currentProfile).catch(()=>{});else native.hide();}
     for (const [mid, view] of views) view.setVisible(mid === id);
@@ -168,9 +172,9 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     authorized(event);
     if(method==='edit')return edit(event.sender,value);
     if(method==='unread-state'){if(event.sender.id!==window.webContents.id)throw Error('仅工作空间可读取未读状态。');return unread.snapshot();}
-    if(method==='unread-report'){const account=config.accounts.find(a=>views.get(a.id)?.webContents.id===event.sender.id);if(!account||!validCount(value))throw Error('未读状态无效。');waUnreadReaders.get(account.id)?.reportTitle(value);return true;}
+    if(method==='unread-report'){if(browserManager?.ownsWhatsApp(event.sender.id))return browserManager.reportUnread(event.sender.id,value);const account=config.accounts.find(a=>views.get(a.id)?.webContents.id===event.sender.id);if(!account||!validCount(value))throw Error('未读状态无效。');waUnreadReaders.get(account.id)?.reportTitle(value);return true;}
     if(method==='input-diagnostics')return native?native.inputDiagnostics():{available:false};
-    if(method==='chat-zoom'){const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
+    if(method==='chat-zoom'){if(browserManager?.ownsWhatsApp(event.sender.id))return browserManager.zoomFor(event.sender.id,value);const apply=zoomBindings.get(event.sender.id);if(!apply)throw new Error('请在聊天区域调整缩放。');return apply(value);}
     if (method === 'translate') {
       validTranslation(value);
       return translator.translate(value.text, value.target);
@@ -187,11 +191,12 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       if(value.translationTarget!==undefined&&!['zh-Hans','en'].includes(value.translationTarget))throw Error('翻译语言无效。');
       config.preferences = { language: value.language, theme: value.theme, size: value.size, ...(value.translationTarget?{translationTarget:value.translationTarget}:{}) }; save();
       for (const view of views.values()) view.webContents.send('chatbridge:preferences', config.preferences);
-      native?.preferences(config.preferences);return config.preferences;
+      browserManager?.preferences(config.preferences);native?.preferences(config.preferences);return config.preferences;
     }
     if (method === 'accounts') return config.accounts.map(({id,name})=>({id,name}));
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='browser-env'){if(!browserManager)throw Error('浏览器环境未启用。');return browserManager.handle(value);}
     if(method==='proxy-settings'){
       const account=config.accounts.find(a=>a.id===value?.id);if(!account)throw Error('未知 WhatsApp 账号。');
       if(value.config===undefined)return {...proxyAPI.publicConfig(account.proxy,safeStorage),status:proxyControllers.get(account.id)?.state()};
@@ -224,7 +229,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       if(value.persist){config.sidebarWidth=sidebarWidth;save();}
       return {width:sidebarWidth};
     }
-    if(method==='home'){activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');return true;}
+    if(method==='home'){browserManager?.hide();activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');return true;}
     if(method==='workspace-modal'){if(native)native.suspend(value===true);return true;}
     if (method.startsWith('update-')) {
       if (!updater) throw new Error('更新模块未初始化。');
@@ -290,6 +295,10 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     }
     throw new Error('未知请求。');
   };
+  if(suppliedElectron?.session?.fromPath){
+    const {createBrowserManager}=require('./browser/manager.cjs');
+    browserManager=createBrowserManager({root:path.join(app.getPath('appData'),'ChatBridgeBrowserEnvironments'),rootDir,window,electron:suppliedElectron,sidebarWidth:()=>sidebarWidth,hideOtherViews:()=>{activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:active',null);},focusHost:()=>native?.focusHost(),allowWhatsApp:wc=>allowed.add(wc.id),releaseWhatsApp:id=>allowed.delete(id),notify:value=>{if(!window.isDestroyed?.())window.webContents.send('chatbridge:browser-state',value);},notifications:()=>config.notifications!==false});
+  }
   ipcMain.handle('chatbridge:invoke',handleRequest);
   if(native)native.setRPC((method,value,profile)=>{if(method==='chat-zoom'){if(!signalAccounts().some(a=>a.id===profile))throw Error('未知 Signal 账号。');return accountZoom('signal',profile,value);}return handleRequest({sender:{id:window.webContents.id}},method,value);});
   for(const account of config.accounts)ensureWhatsApp(account);
@@ -298,7 +307,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   let updateTimer;
   if (updater) { updater.check(); updateTimer=setInterval(()=>updater.check(),6*60*60*1000);updateTimer.unref(); }
   window.once('closed', () => {
-    if(updateTimer)clearInterval(updateTimer);
+    if(updateTimer)clearInterval(updateTimer);browserManager?.close();
     ipcMain.removeHandler('chatbridge:invoke');
     for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
     for(const reader of waUnreadReaders.values())reader.stop();waUnreadReaders.clear();
