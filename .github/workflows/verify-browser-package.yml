@@ -19,12 +19,12 @@ jobs:
       - name: Require the exact packaged application source
         shell: pwsh
         run: |
-          $changed = git diff --name-only f5628742d13c46a555ec9e56d9501011ce238452 HEAD -- extension prepare_source.py local_translate package.json package-lock.json
+          $changed = git diff --name-only f788e683e40bfee415b452d96099fb2b03e2a624 f788e683e40bfee415b452d96099fb2b03e2a624 -- extension prepare_source.py local_translate package.json package-lock.json
           if ($changed) { throw 'Application sources changed; rebuild the installer before verification' }
       - uses: actions/download-artifact@v4
         with:
           name: ChatBridge-startup-test-installer
-          run-id: 41696265340
+          run-id: 41699710456
           github-token: ${{ github.token }}
           path: existing-installer
       - name: Extract the installer for isolated verification
