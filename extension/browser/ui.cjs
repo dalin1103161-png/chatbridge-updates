@@ -32,12 +32,21 @@ function installBrowserUI(ipc=require('electron').ipcRenderer){
    try{await body(d,close);}catch(e){create('p',reportError(e),d);}button(d,'关闭','关闭窗口',()=>close());
   }
   function newEnvironment(){const previous=current()?.id;return dialog('新建浏览器环境',(form,close)=>{const name=field(form,'环境名称','environment-name','新环境'),report=create('span','',form);report.dataset.browserReport='1';const save=button(form,'创建环境','建立独立环境',async()=>{save.disabled=true;const r=await invoke('create',{name:name.value});save.disabled=false;if(r)await close(false);});name.focus();},previous);}
-  function addSite(e){return dialog('添加网站或账号',async(form,close)=>{
+  function siteFields(form,e,run,saveSettings,close){
+   create('h3','新增网站',form);
    const adapter=select(form,'类型',[['whatsapp','WhatsApp'],['website','自定义网站']],'website'),account=select(form,'会话',[['','新建独立账号会话'],...e.accounts.map(a=>[a.id,a.platform+' · '+a.name])],''),url=field(form,'网站 URL','url','https://'),platform=field(form,'平台名称','platform',''),name=field(form,'账号名称','account-name',''),note=field(form,'备注','note','');
    const change=()=>{const existing=e.accounts.find(a=>a.id===account.value),wa=(existing?.adapter||adapter.value)==='whatsapp';adapter.disabled=Boolean(existing);for(const f of [platform,name,note])f.disabled=Boolean(existing);if(wa)url.value='https://web.whatsapp.com/';else if(url.value==='https://web.whatsapp.com/')url.value='https://';};adapter.onchange=account.onchange=change;
-   create('small','新增独立会话可登录另一个账号；选择已有会话将继续使用其登录状态。',form);create('span','',form).dataset.browserReport='1';const save=button(form,'添加并打开','在当前环境中打开标签页',async()=>{save.disabled=true;const args={id:e.id,url:url.value};const r=account.value?await invoke('add-tab',{...args,accountId:account.value}):await invoke('add-site',{...args,adapter:adapter.value,platform:platform.value,name:name.value,note:note.value});save.disabled=false;if(r)await close(false);});url.focus();
-  },e.id);}
-  function settings(e){return dialog('浏览器环境设置',async(form,close)=>{
+   create('small','新增独立会话可登录另一个账号；选择已有会话将继续使用其登录状态。',form);
+   button(form,'保存并添加网站','应用代理设置并打开网站',()=>run(async()=>{
+    await saveSettings();
+    const args={id:e.id,url:url.value};
+    await call(account.value?'add-tab':'add-site',account.value?{...args,accountId:account.value}:{...args,adapter:adapter.value,platform:platform.value,name:name.value,note:note.value});
+    await close(false);
+   }));
+  }
+  function settings(e){return dialog('浏览器环境管理',async(form,close)=>{
+   form.style.maxHeight='85vh';form.style.overflowY='auto';
+   create('h3','代理 IP 与环境配置',form);
    const s=await call('settings',{id:e.id}),name=field(form,'环境名称','environment-name',s.name),p=s.proxy,f=s.profile;
    create('small','同一环境的所有账号会话使用这份代理和环境配置。保存会重新加载当前标签页。',form);
    const enabled=checkbox(form,'启用代理',p.enabled),protocol=select(form,'协议',[['http','HTTP'],['https','HTTPS'],['socks5','SOCKS5（无密码）']],p.protocol),host=field(form,'IP / 主机（可粘贴完整代理）','proxy-host',p.host),port=field(form,'端口','proxy-port',p.port),username=field(form,'用户名','proxy-user',p.username),password=field(form,'密码','proxy-password','','password');host.placeholder='IP:端口:用户名:密码';if(p.hasPassword)password.placeholder='已加密保存，留空保留';
@@ -45,7 +54,15 @@ function installBrowserUI(ipc=require('electron').ipcRenderer){
    const autoTimezone=checkbox(form,'时区跟随代理出口 IP',p.autoTimezone),timezone=field(form,'手动时区（关闭自动时）','timezone',p.timezone);timezone.placeholder='America/New_York';timezone.disabled=autoTimezone.checked;autoTimezone.onchange=()=>timezone.disabled=autoTimezone.checked;
    const languageMode=select(form,'语言来源',[['system','系统语言'],['ip','跟随出口 IP'],['manual','手动指定']],f.languageMode),language=field(form,'手动语言 / 自动匹配备选','language',f.language),geoMode=select(form,'地理位置',[['off','关闭'],['ip','使用出口 IP 近似位置'],['manual','手动坐标']],f.geoMode),latitude=field(form,'纬度（手动模式）','latitude',f.latitude,'number'),longitude=field(form,'经度（手动模式）','longitude',f.longitude,'number'),accuracy=field(form,'位置精度（米）','accuracy',f.accuracy,'number');latitude.step=longitude.step='any';
    create('small','UA、平台、屏幕与 CPU 显示原生检测值；Canvas、WebGL、字体未做内核替换。',form);const report=create('span','',form);report.dataset.browserReport='1';
-   const save=button(form,'保存并应用','更新当前环境',async()=>{save.disabled=true;report.textContent='正在应用环境设置…';const r=await invoke('save-settings',{id:e.id,name:name.value,proxy:{enabled:enabled.checked,protocol:protocol.value,host:host.value,port:port.value,username:username.value,password:password.value,keepPassword:p.hasPassword,autoTimezone:autoTimezone.checked,timezone:timezone.value},profile:{languageMode:languageMode.value,language:language.value,geoMode:geoMode.value,latitude:latitude.value===''?null:Number(latitude.value),longitude:longitude.value===''?null:Number(longitude.value),accuracy:Number(accuracy.value)}});save.disabled=false;if(r)await close(false);});
+   const values=()=>({id:e.id,name:name.value,proxy:{enabled:enabled.checked,protocol:protocol.value,host:host.value,port:port.value,username:username.value,password:password.value,keepPassword:p.hasPassword,autoTimezone:autoTimezone.checked,timezone:timezone.value},profile:{languageMode:languageMode.value,language:language.value,geoMode:geoMode.value,latitude:latitude.value===''?null:Number(latitude.value),longitude:longitude.value===''?null:Number(longitude.value),accuracy:Number(accuracy.value)}});
+   const run=async task=>{if(busy)return;busy=true;report.textContent='正在处理…';try{await task();}catch(error){report.textContent=reportError(error);}finally{busy=false;}};
+   const saveSettings=()=>call('save-settings',{...values(),deferActivation:true});
+   button(form,'检测 IP','用当前表单中的代理检测出口 IP',()=>run(async()=>{
+    const result=await call('check-proxy',values());
+    report.textContent=`出口 IP：${result.ip} · 时区：${result.timezone}`;
+   }));
+   button(form,'保存并应用','保存当前环境设置',()=>run(async()=>{await saveSettings();await close();}));
+   siteFields(form,e,run,saveSettings,close);
   },e.id);}
   function siteDetails(e){const tab=e.tabs.find(t=>t.id===e.activeTab),a=e.accounts.find(a=>a.id===tab?.accountId);if(!a)return;return dialog('网站账号与备注',(form,close)=>{const p=field(form,'平台名称','platform',a.platform),n=field(form,'账号名称','account-name',a.name),note=field(form,'备注','note',a.note);create('span','',form).dataset.browserReport='1';button(form,'保存','保存网站账号信息',async()=>{if(await invoke('site-details',{id:e.id,accountId:a.id,platform:p.value,name:n.value,note:note.value}))await close();});},e.id);}
   async function diagnose(e){if(busy)return;busy=true;let result;try{result=await call('diagnose',{id:e.id});}catch(error){result={error:reportError(error)};}finally{busy=false;}
@@ -62,8 +79,8 @@ function installBrowserUI(ipc=require('electron').ipcRenderer){
     row.ondragstart=event=>{if(event.target.textContent==='×'){event.preventDefault();return;}dragTab=t.id;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',t.id);};row.ondragend=()=>{dragTab=null;render();};row.ondragover=event=>{if(dragTab)event.preventDefault();};row.ondrop=event=>{if(!dragTab)return;event.preventDefault();const source=dragTab;dragTab=null;invoke('move',{id:e.id,tab:source,index:e.tabs.indexOf(t)});};
    }
    if(!e.tabs.length)create('span','添加一个网站开始',tabs);else if(e.state!=='ready'&&e.message){const n=create('span',e.message,tabs);n.style.cssText='font-size:11px;color:#ffbf69;white-space:nowrap;';}
-   button(bar,'＋','添加网站或独立账号',()=>addSite(e));if(e.activeTab){button(bar,'↻','刷新当前标签',()=>invoke('refresh',{id:e.id}));button(bar,'⧉','复制标签，共用原账号会话',()=>invoke('duplicate',{id:e.id,tab:e.activeTab}));button(bar,'账号','平台名称、账号名称和备注',()=>siteDetails(e));}
-   button(bar,'检测','指纹概览与网络一致性检测',()=>diagnose(e));button(bar,'设置','代理、语言和地理位置',()=>settings(e));
+   if(e.activeTab){button(bar,'↻','刷新当前标签',()=>invoke('refresh',{id:e.id}));button(bar,'⧉','复制标签，共用原账号会话',()=>invoke('duplicate',{id:e.id,tab:e.activeTab}));button(bar,'账号','平台名称、账号名称和备注',()=>siteDetails(e));}
+   button(bar,'检测','指纹概览与网络一致性检测',()=>diagnose(e));button(bar,'环境管理','设置代理 IP、检测 IP 和新增网站',()=>settings(e));
   }
   ipc.on('chatbridge:browser-state',(_e,s)=>{if(s?.environments){state=s;render();}});invoke('restore');
  }

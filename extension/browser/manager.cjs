@@ -76,9 +76,18 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
   if(op==='create'){const e=store.create(v.name);await activate(e.id);return snapshot();}
   if(op==='activate')return activate(key,v.tab);
   if(op==='settings'){const e=store.get(key);let settings;try{settings=proxy.publicConfig(e.proxy,electron.safeStorage);}catch{settings={...e.proxy,secret:undefined,hasPassword:false,username:''};}return {name:e.name,profile:e.profile,proxy:settings};}
+  if(op==='check-proxy'){
+   const config=proxy.validate(v.proxy,store.get(key).proxy,electron.safeStorage);
+   if(!config.enabled)throw Error('请先启用代理并填写代理地址。');
+   const session=electron.session.fromPartition('chatbridge-probe-'+require('node:crypto').randomUUID());
+   const view=new electron.WebContentsView({webPreferences:{session,...protectedPrefs}});
+   const controller=proxy.createProxyController(view.webContents,{net:electron.net,safeStorage:electron.safeStorage,lookup:lookupProxy});
+   try{return await controller.configure(config);}
+   finally{controller.block();view.webContents.close();await session.closeAllConnections().catch(()=>{});}
+  }
   if(op==='save-settings'){
    const e=store.get(key),nextProfile=profile(v.profile),nextProxy=proxy.validate(v.proxy,e.proxy,electron.safeStorage);if(!nextProxy.enabled&&[nextProfile.languageMode,nextProfile.geoMode].includes('ip'))throw Error('语言或位置跟随 IP 时需要启用代理。');
-   store.edit(key,x=>{x.name=label(v.name);x.profile=nextProfile;x.proxy=nextProxy;},{settings:true});disposeRuntime(key);return activate(key);
+   store.edit(key,x=>{x.name=label(v.name);x.profile=nextProfile;x.proxy=nextProxy;},{settings:true});disposeRuntime(key);if(v.deferActivation)return snapshot();return activate(key);
   }
   if(op==='add-site'){store.addSite(key,v);return activate(key);}
   if(op==='add-tab'){store.addTab(key,v.accountId,v.url);return activate(key);}
