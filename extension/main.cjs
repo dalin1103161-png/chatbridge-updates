@@ -151,14 +151,14 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       view.webContents.once('destroyed',()=>{reader.stop();waUnreadReaders.delete(account.id);});
       view.webContents.on('page-title-updated',(_event,title)=>{const count=titleUnread(title);if(count!==null)reader.reportTitle(count);});
       view.webContents.on('did-finish-load',()=>{authoritative=false;misses=0;sample();if(activeId===account.id)focusWhatsApp(account.id);});
-      if(view.webContents.session){const controller=proxyAPI.createProxyController(view.webContents,{net,safeStorage,notify:state=>window.webContents.send('chatbridge:proxy-status',{id:account.id,...state})});proxyControllers.set(account.id,controller);}
+      if(view.webContents.session){const controller=proxyAPI.createProxyController(view.webContents,{net,safeStorage,notify:state=>window.webContents.send('chatbridge:proxy-status',{id:account.id,...state})});proxyControllers.set(account.id,controller);view.webContents.on('did-fail-load',(_e,code,_description,_url,isMainFrame)=>{if(account.proxy?.enabled&&isMainFrame&&code!==-3)controller.fail();});}
       if(!account.proxy?.enabled&&!view.webContents.session)view.webContents.loadURL('https://web.whatsapp.com/');
       else connectWhatsApp(account).catch(()=>{});
     }
   }
   async function connectWhatsApp(account){
     if(proxyJobs.has(account.id))return proxyJobs.get(account.id);
-    const job=(async()=>{const view=views.get(account.id),controller=proxyControllers.get(account.id);if(!controller)throw Error('代理模块未初始化。');const state=await controller.configure(account.proxy||{enabled:false});await view.webContents.loadURL('https://web.whatsapp.com/');return state;})();proxyJobs.set(account.id,job);try{return await job;}finally{proxyJobs.delete(account.id);}
+    const job=(async()=>{const view=views.get(account.id),controller=proxyControllers.get(account.id);if(!controller)throw Error('代理模块未初始化。');const state=await controller.configure(account.proxy||{enabled:false});try{await view.webContents.loadURL('https://web.whatsapp.com/');}catch{if(account.proxy?.enabled){controller.fail();throw Error('代理已设置，但 WhatsApp 加载失败，请检查连接后重试。');}throw Error('WhatsApp 加载失败，请检查网络。');}return state;})();proxyJobs.set(account.id,job);try{return await job;}finally{proxyJobs.delete(account.id);}
   }
   function openWhatsApp(account){ensureWhatsApp(account);show(account.id);const controller=proxyControllers.get(account.id);if(controller?.state().state==='blocked')window.webContents.send('chatbridge:proxy-status',{id:account.id,...controller.state()});}
   const authorized = event => {

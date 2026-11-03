@@ -33,6 +33,8 @@ function createProxyController(contents,{net,safeStorage,notify=()=>{},lookup}={
  contents.on('login',(event,_details,info,callback)=>{if(!current?.enabled||!info.isProxy)return;event.preventDefault();if(String(info.host).toLowerCase()===current.host.replace(/^\[|\]$/g,'').toLowerCase()&&Number(info.port)===current.port)callback(auth.username,auth.password);else callback();});
  const detect=lookup|| (async config=>{let error;for(const url of ['https://ipwho.is/','https://ipapi.co/json/']){try{const value=await geoRequest(net,ses,url,config,auth);if(value.success===false||!isIP(value.ip))throw Error();const zone=timezone(typeof value.timezone==='string'?value.timezone:value.timezone?.id);return {ip:value.ip,timezone:zone};}catch(e){error=e;}}throw error||Error('无法检测出口 IP');});
  const block=()=>{phase='blocked';contents.stop?.();};
+ const fail=()=>{if(closed)return;block();update({state:'blocked',enabled:current?.enabled===true,message:'代理连接已暂停，请检查网络并重新检测。'});ses.closeAllConnections().catch(()=>{});};
+ ses.webRequest.onErrorOccurred?.(details=>{if(current?.enabled&&/ERR_(PROXY_|TUNNEL_CONNECTION_FAILED|SOCKS_CONNECTION_)/.test(details.error||''))fail();});
  const configure=async config=>{
   block();current=config;update({state:'checking'});
   try{
@@ -47,6 +49,6 @@ function createProxyController(contents,{net,safeStorage,notify=()=>{},lookup}={
  };
  contents.debugger.on?.('detach',()=>{if(current?.enabled&&!closed){block();update({state:'blocked',enabled:true,message:'时区设置已断开，请重新检测代理。'});ses.closeAllConnections().catch(()=>{});}});
  contents.once('destroyed',()=>{closed=true;phase='blocked';});
- return {configure,block,state:()=>({...status})};
+ return {configure,block,fail,state:()=>({...status})};
 }
 module.exports={timezone,validate,credentials,publicConfig,createProxyController,geoRequest};
