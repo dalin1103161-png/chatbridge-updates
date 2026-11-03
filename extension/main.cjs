@@ -24,7 +24,7 @@ function installChatBridge(window, rootDir, suppliedElectron) {
   return installWorkspace(native.host, rootDir, electron, native);
 }
 function installWorkspace(window, rootDir, suppliedElectron, native) {
-  const { app, ipcMain, WebContentsView, clipboard, Notification, Menu } = suppliedElectron || require('electron');
+  const { app, ipcMain, WebContentsView, clipboard, Notification, Menu, net, safeStorage } = suppliedElectron || require('electron');
   const spawn = suppliedElectron?.spawn || require('node:child_process').spawn;
   let updater;
   if (!suppliedElectron || native) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
@@ -76,6 +76,8 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     fs.writeFileSync(temp, JSON.stringify(config), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(temp, filename);
   };
+  const proxyControllers=new Map(),proxyJobs=new Map();
+  const proxyAPI=require('./proxy.cjs');
   const zoomBindings=new Map();
   const savedZoom=config.chatZoom&&typeof config.chatZoom==='object'&&!Array.isArray(config.chatZoom)?config.chatZoom:{};
   const accountZoom=(platform,id,value)=>{
@@ -149,10 +151,16 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       view.webContents.once('destroyed',()=>{reader.stop();waUnreadReaders.delete(account.id);});
       view.webContents.on('page-title-updated',(_event,title)=>{const count=titleUnread(title);if(count!==null)reader.reportTitle(count);});
       view.webContents.on('did-finish-load',()=>{authoritative=false;misses=0;sample();if(activeId===account.id)focusWhatsApp(account.id);});
-      view.webContents.loadURL('https://web.whatsapp.com/');
+      if(view.webContents.session){const controller=proxyAPI.createProxyController(view.webContents,{net,safeStorage,notify:state=>window.webContents.send('chatbridge:proxy-status',{id:account.id,...state})});proxyControllers.set(account.id,controller);}
+      if(!account.proxy?.enabled&&!view.webContents.session)view.webContents.loadURL('https://web.whatsapp.com/');
+      else connectWhatsApp(account).catch(()=>{});
     }
   }
-  function openWhatsApp(account){ensureWhatsApp(account);show(account.id);}
+  async function connectWhatsApp(account){
+    if(proxyJobs.has(account.id))return proxyJobs.get(account.id);
+    const job=(async()=>{const view=views.get(account.id),controller=proxyControllers.get(account.id);if(!controller)throw Error('代理模块未初始化。');const state=await controller.configure(account.proxy||{enabled:false});await view.webContents.loadURL('https://web.whatsapp.com/');return state;})();proxyJobs.set(account.id,job);try{return await job;}finally{proxyJobs.delete(account.id);}
+  }
+  function openWhatsApp(account){ensureWhatsApp(account);show(account.id);const controller=proxyControllers.get(account.id);if(controller?.state().state==='blocked')window.webContents.send('chatbridge:proxy-status',{id:account.id,...controller.state()});}
   const authorized = event => {
     if (!allowed.has(event.sender.id)) throw new Error('此页面没有调用翻译接口的权限。');
   };
@@ -181,9 +189,17 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       for (const view of views.values()) view.webContents.send('chatbridge:preferences', config.preferences);
       native?.preferences(config.preferences);return config.preferences;
     }
-    if (method === 'accounts') return config.accounts;
+    if (method === 'accounts') return config.accounts.map(({id,name})=>({id,name}));
     // Workspace changes can only come from the trusted Signal application frame.
     if (event.sender.id !== window.webContents.id) throw new Error('请从 APP 顶部切换账号。');
+    if(method==='proxy-settings'){
+      const account=config.accounts.find(a=>a.id===value?.id);if(!account)throw Error('未知 WhatsApp 账号。');
+      if(value.config===undefined)return {...proxyAPI.publicConfig(account.proxy,safeStorage),status:proxyControllers.get(account.id)?.state()};
+      if(proxyJobs.has(account.id))throw Error('正在检测连接，请稍后重试。');
+      const next=proxyAPI.validate(value.config,account.proxy,safeStorage);const view=views.get(account.id);proxyControllers.get(account.id)?.block();view?.webContents.stop?.();await view?.webContents.session?.closeAllConnections();
+      account.proxy=next;save();if(!view)ensureWhatsApp(account);else await connectWhatsApp(account);return {...proxyAPI.publicConfig(account.proxy,safeStorage),status:proxyControllers.get(account.id)?.state()};
+    }
+    if(method==='proxy-retry'){const account=config.accounts.find(a=>a.id===value);if(!account)throw Error('未知 WhatsApp 账号。');return connectWhatsApp(account);}
     if(method==='workspace-zoom'){
       if(!value||!['signal','whatsapp'].includes(value.platform)||typeof value.id!=='string'||!(value.platform==='signal'?signalAccounts():config.accounts).some(a=>a.id===value.id))throw Error('请选择有效账号。');
       const state=accountZoom(value.platform,value.id,value.action===undefined?undefined:{action:value.action});
@@ -267,8 +283,9 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
       openWhatsApp(account); return true;
     }
     if (method === 'add-whatsapp') {
-      if (typeof value !== 'string' || !value.trim() || value.trim().length > 40) throw new Error('备注需要 1–40 个字符。');
-      const account = { id: crypto.randomUUID(), name: value.trim() };
+      const name=typeof value==='string'?value:value?.name;
+      if (typeof name !== 'string' || !name.trim() || name.trim().length > 40) throw new Error('备注需要 1–40 个字符。');
+      const account = { id: crypto.randomUUID(), name: name.trim(),...(typeof value==='object'&&value.proxy?{proxy:proxyAPI.validate(value.proxy,undefined,safeStorage)}:{}) };
       config.accounts.push(account); save(); openWhatsApp(account); return account;
     }
     throw new Error('未知请求。');

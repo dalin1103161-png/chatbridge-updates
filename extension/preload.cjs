@@ -5,6 +5,11 @@ function signalUnreadCount(lookup){
  if(!lookup||typeof lookup!=='object'||Array.isArray(lookup))return null;
  let total=0;for(const row of Object.values(lookup)){if(!row||row.unreadCount===undefined)continue;if(!Number.isSafeInteger(row.unreadCount)||row.unreadCount<0)return null;total+=row.unreadCount;if(!Number.isSafeInteger(total))return null;}return total;
 }
+function parseProxyLine(text){
+ if(typeof text!=='string'||text.length>4096||/[\r\n\0]/.test(text))return null;
+ text=text.trim();try{if(/^(http|https|socks5):\/\//i.test(text)){const u=new URL(text);if(u.pathname!=='/'&&u.pathname!=='')return null;return {protocol:u.protocol.slice(0,-1),host:u.hostname,port:u.port||(u.protocol==='https:'?'443':'80'),username:decodeURIComponent(u.username),password:decodeURIComponent(u.password)};}
+ const m=/^(\[[^\]]+\]|[^:\s]+):(\d+)(?::([^:]*):(.*))?$/.exec(text);return m?{host:m[1],port:m[2],username:m[3]||'',password:m[4]||''}:null;}catch{return null;}
+}
 function installPreload(options = {}) {
   const ipc = options.ipc || require('electron').ipcRenderer;
   const signalContent = options.signalContent ?? process.argv.includes('--chatbridge-signal-content');
@@ -84,6 +89,18 @@ function installPreload(options = {}) {
       make('h2',title,form); overlay.onclick=e=>{if(e.target===overlay)overlay.remove();};
       overlay.onkeydown=e=>{if(e.key==='Escape')overlay.remove();};applyPrefs();return {overlay,form};
     };
+    const proxyEditor=(form,initial={})=>{
+      const enabledLabel=make('label','为此 WhatsApp 账号使用代理 IP',form),enabled=make('input',null,enabledLabel);enabled.type='checkbox';enabled.checked=initial.enabled===true;
+      const protocolLabel=make('label','代理协议 / Protocol',form),protocol=make('select',null,protocolLabel);for(const [v,t]of [['http','HTTP（带账号密码）'],['https','HTTPS（带账号密码）'],['socks5','SOCKS5（无密码）']])make('option',t,protocol).value=v;protocol.value=initial.protocol||'http';
+      const field=(caption,key,type='text')=>{const label=make('label',caption,form),input=make('input',null,label);input.type=type;input.dataset.cbProxyField=key;input.autocomplete='off';input.value=initial[key]||'';return input;};
+      const host=field('IP / 主机（可粘贴完整四段式代理）','host'),port=field('端口 / Port','port'),username=field('用户名 / Username','username'),password=field('密码 / Password','password','password');host.placeholder='IP:端口:用户名:密码';port.inputMode='numeric';if(initial.hasPassword)password.placeholder='已加密保存，留空保留原密码';
+      const feedback=make('small','粘贴完整代理后，会自动填充其余三栏。',form);
+      const fill=text=>{const parsed=parseProxyLine(text);if(!parsed)return false;for(const key of ['host','port','username','password'])({host,port,username,password})[key].value=parsed[key];if(parsed.protocol)protocol.value=parsed.protocol;enabled.checked=true;feedback.textContent='已自动填充端口、用户名和密码';return true;};
+      host.onpaste=event=>{const text=event.clipboardData?.getData('text/plain');if(fill(text))event.preventDefault();};host.oninput=()=>{if(host.value.includes(':'))fill(host.value);};
+      const autoLabel=make('label','时区跟随代理出口 IP',form),auto=make('input',null,autoLabel);auto.type='checkbox';auto.checked=initial.autoTimezone!==false;const zone=field('手动时区（仅关闭自动匹配时使用）','timezone');zone.placeholder='America/New_York';zone.disabled=auto.checked;auto.onchange=()=>zone.disabled=auto.checked;
+      make('small','出口检测仅向 IP 定位服务查询网络地址，不发送聊天内容。检测失败会暂停此账号连接。',form);
+      return ()=>({enabled:enabled.checked,protocol:protocol.value,host:host.value.trim(),port:port.value,username:username.value,password:password.value,keepPassword:initial.hasPassword===true,autoTimezone:auto.checked,timezone:zone.value.trim()});
+    };
     let accounts, load;
     if (!wa && !signalContent) {
       const sidebar=make('div',null,shell);sidebar.dataset.cbSidebar='1';
@@ -116,6 +133,13 @@ function installPreload(options = {}) {
       accountList.ondrop=event=>{if(!dragged)return;event.preventDefault();dropSaved=true;saveOrder();};
       brand.onclick=async()=>{if(await invoke('home',null,status)){selected=null;renderAccounts();}};
       if(ipc.on)ipc.on('chatbridge:home',()=>{selected=null;renderAccounts();});
+      const proxyStates=new Map();
+      const openProxy=async account=>{
+        await invoke('home',null,status);const {overlay,form}=modal(account.name+' · IP / 代理设置');const report=make('span','读取设置…',form);const initial=await invoke('proxy-settings',{id:account.id},report);if(!initial)return;report.textContent=initial.status?.state==='ready'?(initial.status.ip?('出口 IP：'+initial.status.ip+' · '+initial.status.timezone):'当前为直连'):initial.status?.message||'';
+        const read=proxyEditor(form,initial),save=make('button','保存并检测 / Save and connect',form);save.onclick=async()=>{save.disabled=true;report.textContent='正在连接代理并检测出口时区…';const result=await invoke('proxy-settings',{id:account.id,config:read()},report);save.disabled=false;if(result)report.textContent=result.status?.ip?'连接成功 · '+result.status.ip+' · '+result.status.timezone:'已关闭代理，恢复直连';};make('button','关闭',form).onclick=()=>overlay.remove();
+      };
+      const proxyNotice=make('button','',top);proxyNotice.hidden=true;proxyNotice.style.cssText='font-size:11px;color:#ffbf69;';
+      if(ipc.on)ipc.on('chatbridge:proxy-status',(_e,data)=>{proxyStates.set(data.id,data);const row=[...accountList.children].find(r=>r.dataset.cbAccount==='whatsapp:'+data.id);if(row)row.title=data.state==='blocked'?data.message:data.ip?('出口 '+data.ip+' · '+data.timezone):'代理检测中';if(data.state==='blocked'){proxyNotice.hidden=false;proxyNotice.textContent='代理连接暂停 · 点击设置';proxyNotice.onclick=()=>{const account=waList.find(a=>a.id===data.id);if(account)openProxy(account);};}else if(data.state==='ready'){proxyNotice.hidden=![...proxyStates.values()].some(s=>s.state==='blocked');}});
       const badges=new Map(),badgeRevisions=new Map();
       const paintBadge=(open,count)=>{
         let badge=open.querySelector('[data-cb-unread]');if(!count){badge?.remove();return;}
@@ -142,7 +166,7 @@ function installPreload(options = {}) {
             paintBadge(open,badges.get(platform+':'+account.id)||0);
             open.onclick=async()=>{if(dragged)return;const ok=await invoke(platform==='whatsapp'?'whatsapp':'open-signal',account.id,status);if(ok){if(platform==='whatsapp'||platform==='signal'){selected=row.dataset.cbAccount;renderAccounts();}else status.textContent=words[prefs.language].signalInfo;}};
             const rename=make('button','⋯',row);rename.dataset.cbAccountMenu='1';rename.draggable=false;rename.title='修改账号备注 / Rename';rename.style.cssText='width:26px;height:34px;padding:0;border:0;';
-            rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
+            rename.onclick=async()=>{await invoke('home',null,status);const {overlay,form}=modal('修改账号备注 / Rename account');const input=make('input',null,form);input.value=account.name;input.maxLength=40;const report=make('span','',form);if(platform==='whatsapp')make('button','IP / 代理设置',form).onclick=()=>openProxy(account);make('button','保存 / Save',form).onclick=async()=>{if(await invoke('rename-account',{platform,id:account.id,name:input.value},report)){await load();await loadSignals();overlay.remove();}};const remove=make('button','删除账号 / Remove account',form);remove.style.cssText='color:#ff8095;border-color:#ff607950;';
               remove.onclick=()=>{form.replaceChildren();make('h2','确认删除账号？ / Remove account?',form);make('p',account.name,form);make('p','仅从账号列表移除，保留本地登录和聊天数据；不会删除手机上的账号。',form);const report=make('span','',form);const confirm=make('button','确认删除 / Confirm removal',form);confirm.style.color='#ff8095';confirm.onclick=async()=>{confirm.disabled=true;const result=await invoke('remove-account',{platform,id:account.id},report);confirm.disabled=false;if(result){await load();await loadSignals();overlay.remove();status.textContent='账号已从列表移除，本地数据已保留';}};make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
               make('button','取消 / Cancel',form).onclick=()=>overlay.remove();};
           }
@@ -179,7 +203,8 @@ function installPreload(options = {}) {
         const {overlay,form}=modal(words[prefs.language].addWA);form.dataset.chatbridgeAddAccount='1';
         const input=make('input',null,form);input.value='WhatsApp '+accounts.options.length;input.maxLength=40;input.placeholder=words[prefs.language].account;
         const report=make('span','',form),save=make('button',words[prefs.language].add,form);
-        const submit=async()=>{const name=input.value.trim();if(!name||name.length>40){report.textContent='请填写 1–40 个字符的账号备注';return;}save.disabled=true;const account=await invoke('add-whatsapp',name,report);save.disabled=false;if(account){await load();accounts.value=account.id;mark(account.id);overlay.remove();}};
+        const readProxy=proxyEditor(form);
+        const submit=async()=>{const name=input.value.trim();if(!name||name.length>40){report.textContent='请填写 1–40 个字符的账号备注';return;}save.disabled=true;const proxy=readProxy();const account=await invoke('add-whatsapp',proxy.enabled?{name,proxy}:name,report);save.disabled=false;if(account){await load();accounts.value=account.id;mark(account.id);overlay.remove();}};
         save.onclick=submit;input.onkeydown=e=>{if(e.key==='Enter')submit();};make('button',words[prefs.language].close,form).onclick=()=>overlay.remove();input.focus();input.select();
       };
       const signalSelect=make('select');signalSelect.setAttribute('aria-label','Signal accounts');signalSelect.style.maxWidth='170px';
@@ -370,6 +395,6 @@ function installPreload(options = {}) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
   return { scan, state, messageRows };
 }
-module.exports = { installPreload,signalUnreadCount };
+module.exports = { installPreload,signalUnreadCount,parseProxyLine };
 if (typeof process !== 'undefined' && process.argv.includes('--chatbridge-whatsapp')) installPreload({ whatsapp: true });
 

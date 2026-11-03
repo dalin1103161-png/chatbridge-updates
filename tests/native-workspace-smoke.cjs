@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Run with Electron on Windows. Uses blank local fixture windows, never real accounts.
 const {app,BrowserWindow,ipcMain,WebContentsView}=require('electron');const fs=require('node:fs');const path=require('node:path');const os=require('node:os');const assert=require('node:assert/strict');
+app.on('window-all-closed',()=>{});
 const fixture=Boolean(process.env.CHATBRIDGE_SMOKE_CHILD);
 app.whenReady().then(async()=>{
  if(process.env.CHATBRIDGE_HOST_PIPE){
@@ -49,7 +50,7 @@ app.whenReady().then(async()=>{
   controller.hide();assert.equal(controller.snapshot().active,null);
   controller.close(b);assert(!controller.snapshot().windows.some(r=>r.id===b));
   console.log('NATIVE_WORKSPACE_SMOKE_PASS: three isolated processes attached to one parent; switching reuses windows');
-  await controller.shutdown(false);console.log('NATIVE_WORKSPACE_SHUTDOWN_PASS');app.exit(0);
+  await controller.shutdown(false);console.log('NATIVE_WORKSPACE_SHUTDOWN_PASS');await require('./proxy-smoke.cjs')(require('electron'));app.exit(0);
  }catch(e){console.error(e);await controller.shutdown(false);app.exit(1);}
 }).catch(e=>{console.error(e);app.exit(1);});
 

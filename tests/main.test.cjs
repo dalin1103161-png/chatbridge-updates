@@ -8,7 +8,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { installChatBridge, validTranslation } = require('../extension/main.cjs');
 
-function fixture(existingTemp) {
+function fixture(existingTemp,extra={}) {
   const temp = existingTemp || fs.mkdtempSync(path.join(os.tmpdir(), 'chatbridge-'));
   const win = new EventEmitter();
   const actions = [];
@@ -30,7 +30,7 @@ function fixture(existingTemp) {
     setVisible(value) { this.visible = value; }
     setBounds(value) { this.bounds = value; }
   }
-  const electron = { localTranslator:{translate:async(text,target)=>target+':'+text,close:()=>{}}, spawn: (exe,args,options)=>{launches.push({exe,args,options});return {on:()=>{},unref:()=>{}};}, app: { getPath: () => temp },
+  const electron = { ...extra, localTranslator:{translate:async(text,target)=>target+':'+text,close:()=>{}}, spawn: (exe,args,options)=>{launches.push({exe,args,options});return {on:()=>{},unref:()=>{}};}, app: { getPath: () => temp },
     ipcMain: { handle: (_, value) => handler = value, removeHandler: () => {} }, WebContentsView: View };
   const instance = installChatBridge(win, '/source', electron);
   return { temp, win, actions, launches, instance, invoke: (method, value, id = 1) => handler({ sender: { id } }, method, value),
@@ -186,5 +186,14 @@ test('settings zoom targets its account, persists scale and rejects writes from 
  await assert.rejects(f.invoke('workspace-zoom',{...target,action:'in'},f.instance.views.get(b.id).webContents.id),/顶部/);
  await assert.rejects(f.invoke('workspace-zoom',{...target,id:'missing'}),/有效账号/);
  assert.equal(JSON.parse(fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'))).chatZoom['whatsapp:'+a.id],90);
+ }finally{f.close();}
+});
+
+test('proxy imports persist encrypted credentials and never include secrets in account list responses',async()=>{
+ const storage={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s).map(x=>x^53),decryptString:b=>Buffer.from(b).map(x=>x^53).toString()};const f=fixture(undefined,{safeStorage:storage});try{
+ const proxy={enabled:true,protocol:'http',host:'192.0.2.5',port:'8123',username:'test-user',password:'test-secret',autoTimezone:true};const a=await f.invoke('add-whatsapp',{name:'Proxied',proxy});
+ const saved=fs.readFileSync(path.join(f.temp,'chatbridge-whatsapp.json'),'utf8');assert(!saved.includes('test-secret'));assert(!saved.includes('test-user'));assert.deepEqual(await f.invoke('accounts'),[{id:a.id,name:'Proxied'}]);
+ const publicSettings=await f.invoke('proxy-settings',{id:a.id});assert.equal(publicSettings.username,'test-user');assert.equal(publicSettings.password,undefined);assert(publicSettings.hasPassword);
+ await assert.rejects(f.invoke('proxy-settings',{id:a.id},f.instance.views.get(a.id).webContents.id),/顶部/);
  }finally{f.close();}
 });

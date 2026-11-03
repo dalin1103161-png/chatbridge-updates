@@ -163,3 +163,10 @@ test('mixed platform accounts drag between rows, preserve badges and selection, 
   assert.equal(f.calls.filter(c=>c.method==='account-order'&&c.value).length,1);
  }finally{await f.close();}
 });
+
+test('pasting a complete proxy into the IP field automatically fills the other fields',async()=>{
+ const f=fixture();try{await new Promise(r=>setImmediate(r));const d=f.dom.window.document;await [...d.querySelectorAll('button')].find(b=>b.textContent==='＋ 添加 WhatsApp').onclick();
+ const field=k=>d.querySelector('[data-cb-proxy-field="'+k+'"]');let prevented=false;field('host').onpaste({clipboardData:{getData:()=> '192.0.2.10:8123:sample-user:sample:password'},preventDefault(){prevented=true;}});assert(prevented);assert.equal(field('host').value,'192.0.2.10');assert.equal(field('port').value,'8123');assert.equal(field('username').value,'sample-user');assert.equal(field('password').value,'sample:password');assert.equal(field('password').type,'password');
+ const {parseProxyLine}=require('../extension/preload.cjs');assert.equal(parseProxyLine('invalid'),null);assert.equal(parseProxyLine('x:1:u:p\n'),null);assert.equal(parseProxyLine('http://name:pass@192.0.2.2:8123').username,'name');
+ }finally{await f.close();}
+});
