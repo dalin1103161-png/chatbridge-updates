@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "614dec8fb0787c17073ea076fe295fc6fbde1f25",
+  "purpose": "Protect the existing Signal runtime while the browser-environment subsystem is developed independently. Shared main/preload changes require behavioral regression tests; they are not frozen wholesale.",
+  "protectedFiles": {
+    "extension/host.cjs": "13d7df058db9cdba83adfa373fa543a56177094d03d6f20be86790c7ea027093",
+    "extension/native-window.ps1": "c863bbc7dc0b21a05dffc61ae2166a4aa4c425b6bcfb5365ce83ef6f2a88eedb",
+    "prepare_source.py": "1cdf45313ba072b35e426416f4f0e327454f933f858a2f17c2940eae8159125c"
+  },
+  "signalDirectories": [
+    "ChatBridgeSignal",
+    "ChatBridgeSignalProfiles",
+    "ChatBridgeSignalAccounts"
+  ],
+  "legacyWhatsAppPartition": "persist:chatbridge-wa-<account-id>",
+  "hashNormalization": "UTF-8 text with CRLF normalized to LF"
+}
