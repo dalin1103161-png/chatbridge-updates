@@ -38,3 +38,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Application extraction failed' }
       - name: Verify browser UI and persisted site state across executable restarts
         run: node tests/browser-packaged-startup.cjs
+      - name: Verify packaged Signal startup, settings and zoom across two starts
+        shell: pwsh
+        run: |
+          $env:CHATBRIDGE_STARTUP_LABEL = 'first-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'First Signal startup verification failed' }
+          $env:CHATBRIDGE_STARTUP_LABEL = 'second-launch'
+          node tests/packaged-startup.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Second Signal startup verification failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ChatBridge-browser-package-diagnostics
+          path: startup-diagnostics/
+          if-no-files-found: ignore

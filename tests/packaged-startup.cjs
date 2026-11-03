@@ -67,7 +67,9 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    const hostAfter=await homeClient.call('Runtime.evaluate',{expression:`JSON.stringify({width:document.querySelector('[data-cb-sidebar]').getBoundingClientRect().width,dpr:devicePixelRatio})`,returnByValue:true});
    if(hostAfter.result.value!==hostBefore.result.value)throw Error('Chat zoom changed the outer workspace');
    console.log('PACKAGED_SETTINGS_ZOOM_PASS: per-account buttons, persisted scale and independent workspace scale');
-   await hostEval(`document.querySelector('[data-cb-modal]').remove();document.querySelector('[data-cb-account="signal:default"] > button').click()`);await delay(500);
+   await hostEval(`document.querySelector('[data-chatbridge-settings]').lastElementChild.click()`);
+   await hostEval(`document.querySelector('[data-cb-account="signal:default"] > button').click()`);
+   const shownDeadline=Date.now()+10000;while(await evaluate(`document.visibilityState`)!=='visible'){if(Date.now()>shownDeadline)throw Error('Signal did not become visible after closing settings');await delay(100);}
   }
   if(client){const shot=await client.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-login.png'),Buffer.from(shot.data,'base64'));}
   if(!homeVerified)throw Error('Packaged homepage did not become ready');
