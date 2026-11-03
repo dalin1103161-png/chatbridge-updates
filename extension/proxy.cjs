@@ -32,7 +32,7 @@ function createProxyController(contents,{net,safeStorage,notify=()=>{},lookup}={
  ses.webRequest.onBeforeRequest((details,callback)=>{let allowed=phase==='ready';if(phase==='checking'){try{allowed=['https:'].includes(new URL(details.url).protocol)&&['ipwho.is','ipapi.co'].includes(new URL(details.url).hostname);}catch{}}callback({cancel:!allowed});});
  contents.on('login',(event,_details,info,callback)=>{if(!current?.enabled||!info.isProxy)return;event.preventDefault();if(String(info.host).toLowerCase()===current.host.replace(/^\[|\]$/g,'').toLowerCase()&&Number(info.port)===current.port)callback(auth.username,auth.password);else callback();});
  const detect=lookup|| (async config=>{let error;for(const url of ['https://ipwho.is/','https://ipapi.co/json/']){try{const value=await geoRequest(net,ses,url,config,auth);if(value.success===false||!isIP(value.ip))throw Error();const zone=timezone(typeof value.timezone==='string'?value.timezone:value.timezone?.id);return {ip:value.ip,timezone:zone};}catch(e){error=e;}}throw error||Error('无法检测出口 IP');});
- const block=()=>{phase='blocked';contents.stop?.();};
+ const block=()=>{phase='blocked';if(!contents.isDestroyed?.())contents.stop?.();};
  const fail=()=>{if(closed)return;block();update({state:'blocked',enabled:current?.enabled===true,message:'代理连接已暂停，请检查网络并重新检测。'});ses.closeAllConnections().catch(()=>{});};
  ses.webRequest.onErrorOccurred?.(details=>{if(current?.enabled&&/ERR_(PROXY_|TUNNEL_CONNECTION_FAILED|SOCKS_CONNECTION_)/.test(details.error||''))fail();});
  const configure=async config=>{
@@ -47,7 +47,7 @@ function createProxyController(contents,{net,safeStorage,notify=()=>{},lookup}={
    if(closed)throw Error();phase='ready';update({state:'ready',enabled:config?.enabled===true,...result});return {...status};
   }catch{block();update({state:'blocked',enabled:config?.enabled===true,message:'代理或出口时区检测失败，已暂停此账号连接。请检查协议、密码和代理状态后重试。'});throw Error(status.message);}
  };
- contents.debugger.on?.('detach',()=>{if(current?.enabled&&!closed){block();update({state:'blocked',enabled:true,message:'时区设置已断开，请重新检测代理。'});ses.closeAllConnections().catch(()=>{});}});
+ contents.debugger.on?.('detach',()=>{if(current?.enabled&&!closed&&!contents.isDestroyed?.()){block();update({state:'blocked',enabled:true,message:'时区设置已断开，请重新检测代理。'});ses.closeAllConnections().catch(()=>{});}});
  contents.once('destroyed',()=>{closed=true;phase='blocked';});
  return {configure,block,fail,state:()=>({...status})};
 }
