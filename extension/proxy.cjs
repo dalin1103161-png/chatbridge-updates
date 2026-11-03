@@ -39,11 +39,12 @@ function createProxyController(contents,{net,safeStorage,notify=()=>{},lookup}={
   block();current=config;update({state:'checking'});
   try{
    if(!ses.setProxy)throw Error('当前运行环境不支持代理');
+   await contents.loadURL?.('about:blank');
    auth=credentials(config,safeStorage);await ses.closeAllConnections();await ses.clearAuthCache?.();
    await ses.setProxy(config?.enabled?{mode:'fixed_servers',proxyRules:config.protocol+'://'+config.host+':'+config.port,proxyBypassRules:'<-loopback>'}:{mode:'direct'});
    contents.setWebRTCIPHandlingPolicy?.(config?.enabled?'disable_non_proxied_udp':'default');
    let result={};if(config?.enabled){phase='checking';result=await detect(config);if(closed)throw Error();if(!config.autoTimezone)result.timezone=timezone(config.timezone);}
-   const zone=result.timezone||'';if(!contents.debugger.isAttached())contents.debugger.attach('1.3');await contents.debugger.sendCommand('Emulation.setTimezoneOverride',{timezoneId:zone});
+   const zone=result.timezone||'';if(!contents.debugger.isAttached())contents.debugger.attach('1.3');let timezoneTimer;try{await Promise.race([contents.debugger.sendCommand('Emulation.setTimezoneOverride',{timezoneId:zone}),new Promise((_,reject)=>{timezoneTimer=setTimeout(()=>reject(Error('时区初始化超时')),8000);})]);}finally{clearTimeout(timezoneTimer);}
    if(closed)throw Error();phase='ready';update({state:'ready',enabled:config?.enabled===true,...result});return {...status};
   }catch{block();update({state:'blocked',enabled:config?.enabled===true,message:'代理或出口时区检测失败，已暂停此账号连接。请检查协议、密码和代理状态后重试。'});throw Error(status.message);}
  };
