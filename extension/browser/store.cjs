@@ -23,7 +23,12 @@ function createStore(root,adapters){
   if(e.activeTab!==null&&!tabIds.has(e.activeTab))throw Error('活动标签页不存在。');return e;
  }
  for(const entry of fs.readdirSync(root,{withFileTypes:true})){
-  if(!entry.isDirectory()||!UUID.test(entry.name))continue;const file=location(entry.name);if(!fs.existsSync(file))continue;
+  if(!entry.isDirectory()||!UUID.test(entry.name))continue;const file=location(entry.name);
+  if(fs.existsSync(file+'.purge')){
+   try{purgeDirectory(entry.name);}catch{errors.push('有环境的数据仍被占用，彻底删除将在下次启动时重试。');}
+   continue;
+  }
+  if(!fs.existsSync(file))continue;
   let raw;try{raw=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
   try{records.set(entry.name,validate(raw,entry.name));}catch{
    try{if(raw&&raw.schemaVersion!==1)throw Error();records.set(entry.name,validate(JSON.parse(fs.readFileSync(file+'.bak','utf8')),entry.name));errors.push('已恢复一个环境的上一版配置。');}
@@ -33,9 +38,24 @@ function createStore(root,adapters){
  function get(key){const e=records.get(id(key));if(!e)throw Error('浏览器环境不存在。');return structuredClone(e);}
  function save(e){validate(e,e.id);const file=location(e.id);fs.mkdirSync(path.dirname(file),{recursive:true});if(records.has(e.id))atomic(file+'.bak',records.get(e.id));atomic(file,e);records.set(e.id,structuredClone(e));return structuredClone(e);}
  function edit(key,fn,{settings=false}={}){const e=get(key);fn(e);if(settings)e.revision++;return save(e);}
- return {root,errors,get,list:()=>[...records.values()].map(e=>structuredClone(e)),create(name){return save({schemaVersion:1,id:randomUUID(),name:label(name),revision:1,proxy:{enabled:false},profile:defaults(),accounts:[],tabs:[],activeTab:null});},edit,
+ function purgeDirectory(key){
+  const file=location(key),dir=path.dirname(file);
+  // Keep the marker until every other entry has been removed successfully.
+  for(const entry of fs.readdirSync(dir)){
+   if(entry!=='environment.json.purge')fs.rmSync(path.join(dir,entry),{recursive:true,force:true,maxRetries:3});
+  }
+  fs.rmSync(file+'.purge');fs.rmdirSync(dir);
+ }
+ function remove(key,permanent){
+  const e=get(key),file=location(key);
+  if(permanent){atomic(file+'.purge',{pending:true});}
+  else{save({...e,archived:true});}
+  if(permanent)records.delete(key);
+  if(permanent){try{purgeDirectory(key);}catch{errors.push('有环境的数据仍被占用，彻底删除将在下次启动时重试。');}}
+ }
+ return {root,errors,get,remove,list:()=>[...records.values()].map(e=>structuredClone(e)),create(name){return save({schemaVersion:1,id:randomUUID(),name:label(name),revision:1,proxy:{enabled:false},profile:defaults(),accounts:[],tabs:[],activeTab:null});},edit,
   sessionPath(key,account){const e=get(key);if(!e.accounts.some(a=>a.id===account))throw Error('网站账号不存在。');return path.join(root,id(key),'sessions',id(account));},
-  selected(){try{const v=JSON.parse(fs.readFileSync(path.join(root,'selected.json'),'utf8'));return records.has(v.id)?v.id:null;}catch{return null;}},select(key){if(key!==null)get(key);atomic(path.join(root,'selected.json'),{id:key});},
+  selected(){try{const v=JSON.parse(fs.readFileSync(path.join(root,'selected.json'),'utf8'));return records.has(v.id)&&!records.get(v.id).archived?v.id:null;}catch{return null;}},select(key){if(key!==null)get(key);atomic(path.join(root,'selected.json'),{id:key});},
   addSite(key,v){return edit(key,e=>{const adapter=Object.hasOwn(adapters,v.adapter)&&adapters[v.adapter];if(!adapter)throw Error('平台类型无效。');const url=adapter.url(v.url),account={id:randomUUID(),adapter:v.adapter,platform:label(v.platform||adapter.label),name:label(v.name||adapter.label),note:label(v.note||'',500)};e.accounts.push(account);const tab={id:randomUUID(),accountId:account.id,url};e.tabs.push(tab);e.activeTab=tab.id;});},
   addTab(key,accountId,url){return edit(key,e=>{const account=e.accounts.find(a=>a.id===accountId);if(!account)throw Error('网站账号不存在。');const tab={id:randomUUID(),accountId,url:adapters[account.adapter].url(url)};e.tabs.push(tab);e.activeTab=tab.id;});},
   duplicate(key,tabId){const e=get(key),tab=e.tabs.find(t=>t.id===tabId);if(!tab)throw Error('标签页不存在。');return edit(key,e=>{const copy={...tab,id:randomUUID()};e.tabs.splice(e.tabs.findIndex(t=>t.id===tabId)+1,0,copy);e.activeTab=copy.id;});},

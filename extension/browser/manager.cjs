@@ -8,7 +8,7 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
  const envRuntime=key=>{if(!runtime.has(key))runtime.set(key,{accounts:new Map(),tabs:new Map(),network:null,state:'idle',message:''});return runtime.get(key);};
  const cleanAgent=value=>value.replace(/\b(?:Electron|ChatBridge|Signal)\/[^\s]+\s*/g,'');
  const systemLanguage=electron.app.getPreferredSystemLanguages?.()[0]||electron.app.getLocale?.()||'en-US';
- function snapshot(){return {active,errors:store.errors,engines:{electron:process.versions.electron||'',chromium:process.versions.chrome||''},environments:store.list().map(e=>{const r=runtime.get(e.id);return {id:e.id,name:e.name,revision:e.revision,profile:e.profile,proxyEnabled:e.proxy.enabled,accounts:e.accounts,tabs:e.tabs.map(t=>({...t,title:r?.tabs.get(t.id)?.title||''})),activeTab:e.activeTab,state:r?.state||'idle',message:r?.message||'',network:r?.network,unread:[...(r?.accounts.values()||[])].reduce((n,a)=>n+(a.unread||0),0)};})};}
+ function snapshot(){return {active,errors:store.errors,engines:{electron:process.versions.electron||'',chromium:process.versions.chrome||''},environments:store.list().map(e=>{const r=runtime.get(e.id);return {id:e.id,name:e.name,archived:e.archived===true,revision:e.revision,profile:e.profile,proxyEnabled:e.proxy.enabled,accounts:e.accounts,tabs:e.tabs.map(t=>({...t,title:r?.tabs.get(t.id)?.title||''})),activeTab:e.activeTab,state:r?.state||'idle',message:r?.message||'',network:r?.network,unread:[...(r?.accounts.values()||[])].reduce((n,a)=>n+(a.unread||0),0)};})};}
  const emit=()=>{if(!disposed)notify(snapshot());};
  function layout(){const [width,height]=window.getContentSize();const left=sidebarWidth();for(const r of runtime.values())for(const {view}of r.tabs.values())if(!view.webContents.isDestroyed())view.setBounds({x:left,y:88,width:Math.max(1,width-left),height:Math.max(1,height-88)});}
  function visibility(){if(window.isDestroyed?.())return;const selected=active?store.get(active).activeTab:null;for(const [key,r]of runtime)for(const [id,t]of r.tabs)t.view.setVisible(key===active&&id===selected&&r.state!=='blocked'&&t.loaded===true);layout();}
@@ -55,7 +55,7 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
   catch(error){r.tabs.delete(tabId);ar.webContents.delete(t.wcId);ar.geoReady.delete(t.wcId);disposeView(t);if(runtime.get(key)===r)pause(key,'网站加载失败，连接已暂停。请检查代理后刷新。');throw Error('网站加载失败，请检查代理后刷新。',{cause:error});}
  }
  async function activate(key,tab){
-  const e=store.get(key);if(tab!==undefined){if(!e.tabs.some(t=>t.id===tab))throw Error('标签页不存在。');store.edit(key,v=>v.activeTab=tab);}
+  const e=store.get(key);if(e.archived)throw Error('请先恢复此环境。');if(tab!==undefined){if(!e.tabs.some(t=>t.id===tab))throw Error('标签页不存在。');store.edit(key,v=>v.activeTab=tab);}
   hideOtherViews();active=key;store.select(key);visibility();emit();const selected=store.get(key).activeTab;if(selected){const r=envRuntime(key);if(r.state!=='blocked')await openTab(key,selected);visibility();focus();}return snapshot();
  }
  async function diagnose(key){
@@ -75,6 +75,24 @@ function createBrowserManager({root,rootDir,window,electron,sidebarWidth,hideOth
   if(op==='restore'){if(restored)return snapshot();restored=true;const selected=store.selected();return selected?activate(selected):snapshot();}
   if(op==='create'){const e=store.create(v.name);await activate(e.id);return snapshot();}
   if(op==='activate')return activate(key,v.tab);
+  if(op==='restore-environment'){
+   store.edit(key,e=>{delete e.archived;});return activate(key);
+  }
+  if(op==='remove-environment'){
+   store.get(key);
+   const sessions=[...(runtime.get(key)?.accounts.values()||[])].map(a=>a.session);
+   if(active===key)hide();
+   disposeRuntime(key);
+   if(v.permanent===true){
+    await Promise.allSettled(sessions.map(async ses=>{
+     await ses.closeAllConnections();
+     await ses.clearStorageData();
+     await ses.clearCache();
+    }));
+   }
+   store.remove(key,v.permanent===true);
+   emit();return snapshot();
+  }
   if(op==='settings'){const e=store.get(key);let settings;try{settings=proxy.publicConfig(e.proxy,electron.safeStorage);}catch{settings={...e.proxy,secret:undefined,hasPassword:false,username:''};}return {name:e.name,profile:e.profile,proxy:settings};}
   if(op==='check-proxy'){
    const config=proxy.validate(v.proxy,store.get(key).proxy,electron.safeStorage);

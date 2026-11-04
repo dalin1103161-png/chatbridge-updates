@@ -63,7 +63,34 @@ function installBrowserUI(ipc=require('electron').ipcRenderer){
    }));
    button(form,'保存并应用','保存当前环境设置',()=>run(async()=>{await saveSettings();await close();}));
    siteFields(form,e,run,saveSettings,close);
+   removal(form,e,close);
   },e.id);}
+  function removal(form,e,close){
+   create('h3','删除环境',form);
+   const confirmation=field(form,'彻底删除前请输入环境名称','delete-confirm');
+   confirmation.placeholder=e.name;
+   const report=create('p','普通删除会隐藏环境，可从已删除环境恢复。彻底删除会清除该环境的账号会话、缓存和配置。',form);
+   const remove=async permanent=>{
+    if(busy)return;
+    if(permanent&&confirmation.value!==e.name){report.textContent='请输入完整的环境名称确认彻底删除。';return;}
+    busy=true;
+    try{
+     const result=await call('remove-environment',{id:e.id,permanent});
+     state=result;render();
+     if(result.errors?.length&&permanent){report.textContent=result.errors.at(-1);return;}
+     await close(false);
+    }catch(error){report.textContent=reportError(error);}finally{busy=false;}
+   };
+   if(!e.archived)button(form,'普通删除','保留本地数据',()=>remove(false));
+   button(form,'彻底删除','清除本地数据',()=>remove(true));
+  }
+  function deletedEnvironments(){return dialog('已删除环境',(form,close)=>{
+   for(const e of state.environments.filter(e=>e.archived)){
+    create('h3',e.name,form);
+    button(form,'恢复','恢复环境与登录状态',async()=>{if(await invoke('restore-environment',{id:e.id}))await close(false);});
+    removal(form,e,close);
+   }
+  },current()?.id);}
   function siteDetails(e){const tab=e.tabs.find(t=>t.id===e.activeTab),a=e.accounts.find(a=>a.id===tab?.accountId);if(!a)return;return dialog('网站账号与备注',(form,close)=>{const p=field(form,'平台名称','platform',a.platform),n=field(form,'账号名称','account-name',a.name),note=field(form,'备注','note',a.note);create('span','',form).dataset.browserReport='1';button(form,'保存','保存网站账号信息',async()=>{if(await invoke('site-details',{id:e.id,accountId:a.id,platform:p.value,name:n.value,note:note.value}))await close();});},e.id);}
   async function diagnose(e){if(busy)return;busy=true;let result;try{result=await call('diagnose',{id:e.id});}catch(error){result={error:reportError(error)};}finally{busy=false;}
    if(current()?.id!==e.id)return;
@@ -72,7 +99,7 @@ function installBrowserUI(ipc=require('electron').ipcRenderer){
   button(workspace,'＋ 浏览器环境','新建多网站浏览器环境',newEnvironment);
   function render(){
    if(dragTab)return;
-   envList.replaceChildren();envList.hidden=state.environments.length===0&&!state.errors?.length;for(const message of state.errors||[])create('small',message,envList);for(const e of state.environments){const b=button(envList,'◈ '+e.name+(e.unread?' · '+e.unread:''),e.message||e.name,()=>invoke('activate',{id:e.id}));b.dataset.browserEnvironment=e.id;b.dataset.active=String(e.id===state.active);if(e.unread)b.style.color='#ff586e';}
+   envList.replaceChildren();envList.hidden=state.environments.length===0&&!state.errors?.length;for(const message of state.errors||[])create('small',message,envList);if(state.environments.some(e=>e.archived))button(envList,'已删除环境','恢复或彻底删除环境',deletedEnvironments);for(const e of state.environments.filter(e=>!e.archived)){const b=button(envList,'◈ '+e.name+(e.unread?' · '+e.unread:''),e.message||e.name,()=>invoke('activate',{id:e.id}));b.dataset.browserEnvironment=e.id;b.dataset.active=String(e.id===state.active);if(e.unread)b.style.color='#ff586e';}
    const e=current();document.body.toggleAttribute('data-browser-active',Boolean(e));bar.hidden=!e;tabs.replaceChildren();for(const n of [...bar.children])if(n!==tabs)n.remove();if(!e)return;
    for(const t of e.tabs){const a=e.accounts.find(x=>x.id===t.accountId),row=create('div',null,tabs);row.dataset.browserTab=t.id;row.dataset.active=String(t.id===e.activeTab);row.draggable=true;
     button(row,t.title||a?.name||t.url,t.url,()=>invoke('activate',{id:e.id,tab:t.id}));button(row,'×','关闭标签',()=>invoke('close',{id:e.id,tab:t.id})).draggable=false;
