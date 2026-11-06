@@ -25,7 +25,7 @@ jobs:
           python-version: '3.11'
       - name: Package offline translator
         run: |
-          pip install -r local_translate/requirements.txt
+          pip install setuptools==70.3.0 -r local_translate/requirements.txt
           python local_translate/prepare_models.py --dest local-models --cache model-downloads
           pyinstaller --noconfirm --clean --onedir --console --name ChatBridgeTranslator --distpath local-runtime --workpath translator-build --specpath translator-build --collect-all ctranslate2 --collect-all sentencepiece --collect-all numpy local_translate/engine.py
           local-runtime/ChatBridgeTranslator/ChatBridgeTranslator --models local-models --self-test
