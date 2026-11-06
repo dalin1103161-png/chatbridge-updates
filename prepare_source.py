@@ -85,7 +85,7 @@ def prepare(destination, existing=False):
     package['build']['nsis']['oneClick'] = False
     package['build']['nsis']['allowToChangeInstallationDirectory'] = True
     package['build']['win']['signAndEditExecutable'] = False
-    package['build']['linux'] = {'target': ['deb'], 'category': 'Network', 'artifactName': 'ChatBridge-Linux-amd64.${ext}', 'executableName': 'chatbridge', 'maintainer': 'ChatBridge', 'synopsis': 'ChatBridge messaging workspace'}
+    package['build']['linux'].update({'target': ['deb'], 'category': 'Network', 'artifactName': 'ChatBridge-Linux-amd64.${ext}', 'executableName': 'chatbridge', 'maintainer': 'ChatBridge', 'synopsis': 'ChatBridge messaging workspace', 'publish': None})
     package['build']['deb'] = {'depends': ['libgtk-3-0', 'libnss3', 'libasound2t64', 'libxss1', 'libxtst6', 'libgbm1', 'libx11-6', 'python3', 'libsecret-1-0']}
     package['build']['forceCodeSigning'] = False
     package_file.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
