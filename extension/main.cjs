@@ -17,8 +17,8 @@ function validTranslation(value) {
 function installChatBridge(window, rootDir, suppliedElectron) {
   if (suppliedElectron) return installWorkspace(window, rootDir, suppliedElectron);
   const electron = require('electron');
-  if (process.platform !== 'win32') throw new Error('ChatBridge managed workspace requires Windows.');
-  const host = require('./host.cjs');
+  if (!['win32','linux'].includes(process.platform)) throw new Error('Unsupported ChatBridge platform.');
+  const host = require(process.platform==='linux'?'./host-linux.cjs':'./host.cjs');
   if (process.env.CHATBRIDGE_HOST_PIPE) return host.installManagedSignal(window, electron);
   const native = host.createNativeWorkspace(window, rootDir, electron);
   return installWorkspace(native.host, rootDir, electron, native);
@@ -27,7 +27,7 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
   const { app, ipcMain, WebContentsView, clipboard, Notification, Menu, net, safeStorage } = suppliedElectron || require('electron');
   const spawn = suppliedElectron?.spawn || require('node:child_process').spawn;
   let updater;
-  if (!suppliedElectron || native) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
+  if (process.platform === 'win32' && (!suppliedElectron || native)) { updater=require('./updater.cjs').createUpdater({app,spawn,rootDir,notify:s=>window.webContents.send('chatbridge:update',s)}); }
   let browserManager;
   const registryDir = path.join(app.getPath('appData'), 'ChatBridgeSignalAccounts');
   fs.mkdirSync(registryDir, { recursive: true });

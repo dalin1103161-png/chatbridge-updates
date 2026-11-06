@@ -5,7 +5,7 @@
   "protectedFiles": {
     "extension/host.cjs": "13d7df058db9cdba83adfa373fa543a56177094d03d6f20be86790c7ea027093",
     "extension/native-window.ps1": "c863bbc7dc0b21a05dffc61ae2166a4aa4c425b6bcfb5365ce83ef6f2a88eedb",
-    "prepare_source.py": "1cdf45313ba072b35e426416f4f0e327454f933f858a2f17c2940eae8159125c"
+    "prepare_source.py": "3ec89087e39fe4081eef752b82344f2206dd5d46cde343599e63e81caff43ac6"
   },
   "signalDirectories": [
     "ChatBridgeSignal",

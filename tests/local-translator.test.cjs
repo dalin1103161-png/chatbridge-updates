@@ -5,7 +5,7 @@ const {createTranslator}=require('../extension/local-translator.cjs');
 function fixture(reply=true,timeout=1000){
  const resources=fs.mkdtempSync(path.join(os.tmpdir(),'cb-batch-'));
  for(const d of ['local-translation','local-models/en-zh/model','local-models/zh-en/model'])fs.mkdirSync(path.join(resources,d),{recursive:true});
- fs.writeFileSync(path.join(resources,'local-translation/ChatBridgeTranslator.exe'),'');for(const d of ['en-zh','zh-en'])fs.writeFileSync(path.join(resources,'local-models',d,'model/model.bin'),'');
+ fs.writeFileSync(path.join(resources,'local-translation',process.platform==='win32'?'ChatBridgeTranslator.exe':'ChatBridgeTranslator'),'');for(const d of ['en-zh','zh-en'])fs.writeFileSync(path.join(resources,'local-models',d,'model/model.bin'),'');
  const requests=[];let spawned=0;
  const t=createTranslator({resources,timeout,batchDelay:2,spawn:()=>{spawned++;const p=new EventEmitter();p.stdin=new PassThrough();p.stdout=new PassThrough();p.kill=()=>{p.stdin.destroy();p.stdout.destroy();};p.stdin.on('data',buf=>{const request=JSON.parse(String(buf));requests.push(request);if(reply)setImmediate(()=>p.stdout.write(JSON.stringify({id:request.id,results:request.items.map(x=>x.text==='fail'?{error:'Expected item failure'}:{text:x.target+':'+x.text})})+'\n'));});return p;}});
  return {t,requests,get spawned(){return spawned;},close(){t.close();fs.rmSync(resources,{recursive:true,force:true});}};

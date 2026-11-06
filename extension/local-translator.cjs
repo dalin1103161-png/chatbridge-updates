@@ -2,7 +2,7 @@
 'use strict';
 const path=require('node:path'),fs=require('node:fs'),readline=require('node:readline');
 function createTranslator({resources=process.resourcesPath,spawn=require('node:child_process').spawn,timeout=120000,batchDelay=12}={}){
- const exe=path.join(resources,'local-translation','ChatBridgeTranslator.exe'),models=path.join(resources,'local-models');
+ const exe=path.join(resources,'local-translation',process.platform==='win32'?'ChatBridgeTranslator.exe':'ChatBridgeTranslator'),models=path.join(resources,'local-models');
  let child=null,active=null,timer=null,next=0,closed=false,cacheChars=0;
  const queue=[],inflight=new Map(),cache=new Map();
  function finish(job,error,text){inflight.delete(job.key);if(error)job.reject(error);else{

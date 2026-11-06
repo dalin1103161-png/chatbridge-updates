@@ -1,0 +1,55 @@
+name: Build ChatBridge Linux
+on:
+  push:
+    branches: [linux-workspace]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      SIGNAL_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libx11-6 libxss1 libxtst6 libsecret-1-dev libasound2t64 libgbm1 libgtk-3-0t64 xvfb python3-setuptools
+      - run: python3 prepare_source.py --dest signal-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: signal-source/.nvmrc
+      - run: npm ci --ignore-scripts --no-audit --no-fund && npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Package offline translator
+        run: |
+          pip install -r local_translate/requirements.txt
+          python local_translate/prepare_models.py --dest local-models --cache model-downloads
+          pyinstaller --noconfirm --clean --onedir --console --name ChatBridgeTranslator --distpath local-runtime --workpath translator-build --specpath translator-build --collect-all ctranslate2 --collect-all sentencepiece --collect-all numpy local_translate/engine.py
+          local-runtime/ChatBridgeTranslator/ChatBridgeTranslator --models local-models --self-test
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+          run_install: false
+      - working-directory: signal-source
+        run: pnpm install --frozen-lockfile
+      - working-directory: signal-source
+        run: pnpm run generate
+      - working-directory: signal-source
+        run: pnpm run check:types
+      - working-directory: signal-source
+        run: pnpm run build:release --linux deb --x64 --publish=never
+      - name: Verify packaged startup
+        run: xvfb-run -a node tests/linux-startup.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChatBridge-Linux-amd64
+          path: signal-source/release/ChatBridge-Linux-amd64.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ChatBridge-Linux-diagnostics
+          path: startup-diagnostics/
