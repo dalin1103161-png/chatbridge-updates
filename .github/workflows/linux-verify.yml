@@ -1,0 +1,33 @@
+name: Verify Linux second Signal account
+on:
+  push:
+    branches: [linux-package-check]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.0'
+      - run: sudo apt-get update && sudo apt-get install -y libpulse0 libnotify4 libx11-xcb1 libx11-6 libxss1 libxtst6 libsecret-1-0 libasound2t64 libgbm1 libgtk-3-0t64 xvfb python3
+      - uses: actions/download-artifact@v4
+        with:
+          name: ChatBridge-Linux-candidate
+          run-id: 42324459847
+          github-token: ${{ github.token }}
+          path: candidate
+      - run: |
+          dpkg-deb -x candidate/ChatBridge-Linux-amd64.deb extracted
+          mkdir -p signal-source/release
+          ln -s "$PWD/extracted/opt/ChatBridge" signal-source/release/linux-unpacked
+      - run: xvfb-run -a node tests/linux-startup.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ChatBridge-Linux-multi-account-diagnostics
+          path: startup-diagnostics/

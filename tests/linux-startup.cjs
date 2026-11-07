@@ -80,9 +80,10 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    const id=await waitFor(()=>evalHost(`[...document.querySelectorAll('[data-cb-account]')].find(n=>n.textContent.includes('Linux second account'))?.dataset.cbAccount?.split(':')[1]`),'Second Signal account was not added');
    const profile=path.join(process.env.XDG_CONFIG_HOME||path.join(require('node:os').homedir(),'.config'),'ChatBridgeSignalProfiles',id);
    const debug=await waitFor(async()=>{try{return fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];}catch{return null;}},'Second Signal debug endpoint missing');
-   const pages=await(await fetch('http://127.0.0.1:'+debug+'/json/list')).json();
-   const page=pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
-   if(!page)throw Error('Second Signal renderer missing');
+   const page=await waitFor(async()=>{
+    const pages=await(await fetch('http://127.0.0.1:'+debug+'/json/list')).json();
+    return pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
+   },'Second Signal renderer missing');
    const second=await cdp(page.webSocketDebuggerUrl);
    try{
     const read=async()=>{const value=await second.call('Runtime.evaluate',{expression:`({visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||''})`,returnByValue:true});return value.result.value;};
