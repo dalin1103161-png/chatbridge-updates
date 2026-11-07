@@ -51,7 +51,7 @@ def prepare(destination, existing=False):
     replace_once(main, '      ...defaultWebPrefs,\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,',
                  "      ...defaultWebPrefs,\n      additionalArguments: ['--chatbridge-signal-content'],\n      backgroundThrottling: false,\n      nodeIntegration: false,\n      nodeIntegrationInWorker: false,\n      sandbox: false,")
     replace_once(main, 'const gotLock = app.requestSingleInstanceLock();',
-                 "app.disableHardwareAcceleration();\nif (process.platform === 'linux') app.commandLine.appendSwitch('ozone-platform', 'x11');\nif (process.platform === 'win32') {\n  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');\n  app.commandLine.appendSwitch('disable-renderer-backgrounding');\n  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,' + app.commandLine.getSwitchValue('disable-features'));\n}\nconst gotLock = app.requestSingleInstanceLock();")
+                 "app.disableHardwareAcceleration();\nif (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {\n  delete process.env.WAYLAND_DISPLAY;\n  app.relaunch({args: [...process.argv.slice(1), '--ozone-platform=x11', '--disable-gpu', '--disable-dev-shm-usage']});\n  app.exit(0);\n}\nif (process.platform === 'linux') app.commandLine.appendSwitch('ozone-platform', 'x11');\nif (process.platform === 'win32') {\n  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');\n  app.commandLine.appendSwitch('disable-renderer-backgrounding');\n  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,' + app.commandLine.getSwitchValue('disable-features'));\n}\nconst gotLock = app.requestSingleInstanceLock();")
     # Preserve Signal URL handling, but never install official Signal over this fork.
     replace_once(main, '  // Second, start checking for app updates\n',
                  '  // ChatBridge: own updater is not configured; do not replace this fork with official Signal.\n  if (app.getName() === \'ChatBridge\') return;\n\n  // Second, start checking for app updates\n')
@@ -86,7 +86,7 @@ def prepare(destination, existing=False):
     package['build']['nsis']['allowToChangeInstallationDirectory'] = True
     package['build']['win']['signAndEditExecutable'] = False
     package['build']['linux'].update({'target': ['deb'], 'category': 'Network', 'artifactName': 'ChatBridge-Linux-amd64.${ext}', 'executableName': 'chatbridge', 'maintainer': 'ChatBridge', 'synopsis': 'ChatBridge messaging workspace', 'publish': None})
-    package['build']['linux'].setdefault('desktop', {}).setdefault('entry', {})['Exec'] = 'env -u WAYLAND_DISPLAY /opt/ChatBridge/chatbridge --ozone-platform=x11 --disable-gpu --disable-dev-shm-usage %U'
+    package['build']['linux']['executableArgs'] = ['--ozone-platform=x11', '--disable-gpu', '--disable-dev-shm-usage']
     package['build']['deb'] = {'depends': ['libgtk-3-0', 'libnss3', 'libasound2t64', 'libxss1', 'libxtst6', 'libgbm1', 'libx11-6', 'python3', 'libsecret-1-0', 'libpulse0', 'libnotify4', 'libx11-xcb1', 'libc6 (>= 2.34)']}
     package['build']['forceCodeSigning'] = False
     package_file.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
