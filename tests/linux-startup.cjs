@@ -80,12 +80,14 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    const id=await waitFor(()=>evalHost(`[...document.querySelectorAll('[data-cb-account]')].find(n=>n.textContent.includes('Linux second account'))?.dataset.cbAccount?.split(':')[1]`),'Second Signal account was not added');
    const profile=path.join(process.env.XDG_CONFIG_HOME||path.join(require('node:os').homedir(),'.config'),'ChatBridgeSignalProfiles',id);
    const debug=await waitFor(async()=>{try{return fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];}catch{return null;}},'Second Signal debug endpoint missing');
-   const pages=await(await fetch('http://127.0.0.1:'+debug+'/json/list')).json();
-   const page=pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
-   if(!page)throw Error('Second Signal renderer missing');
+   const page=await waitFor(async()=>{
+    const pages=await(await fetch('http://127.0.0.1:'+debug+'/json/list')).json();
+    return pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
+   },'Second Signal renderer missing');
    const second=await cdp(page.webSocketDebuggerUrl);
    try{
-    const read=async()=>{const value=await second.call('Runtime.evaluate',{expression:`({visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||''})`,returnByValue:true});return value.result.value;};
+    const read=async()=>{const value=await second.call('Runtime.evaluate',{expression:`({visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||'',html:document.querySelector('#app-container')?.innerHTML?.slice(0,2500),startApp:typeof window.startApp,context:typeof window.SignalContext})`,returnByValue:true});const result=value.result.value;const logs=path.join(profile,'logs');if(fs.existsSync(logs))for(const name of fs.readdirSync(logs).filter(n=>n.endsWith('.log')))fs.copyFileSync(path.join(logs,name),path.join(output,'child-'+name));fs.writeFileSync(path.join(output,'second-state.json'),JSON.stringify(result,null,2));const shot=await second.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'second-state.png'),Buffer.from(shot.data,'base64'));fs.writeFileSync(path.join(output,'second-events.json'),JSON.stringify(second.events,null,2));return result;};
+    await second.call('Runtime.enable');await second.call('Log.enable');
     await waitFor(async()=>{const r=await read();return r?.visible==='visible'&&/link|关联|扫描|device|QR|phone/i.test(r.text);},'Second Signal QR page did not become visible');
     const shot=await second.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-second-login.png'),Buffer.from(shot.data,'base64'));
     await evalHost(`document.querySelector('[data-cb-account="signal:default"] > button').click()`);

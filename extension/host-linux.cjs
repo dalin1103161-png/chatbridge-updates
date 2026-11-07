@@ -126,7 +126,8 @@ function installManagedSignal(window,electron){
  const connected=new Promise((resolve,reject)=>{socket.once('connect',()=>{socket.write(JSON.stringify({token:process.env.CHATBRIDGE_HOST_TOKEN,profile:process.env.CHATBRIDGE_SIGNAL_PROFILE,pid:process.pid,hwnd:hwnd(window)})+'\n');resolve();});socket.once('error',reject);socket.once('close',()=>reject(Error('账号连接已关闭。')));});connected.catch(()=>{});
  bindSignalUnread(window.webContents,ipcMain,count=>{connected.then(()=>{if(!socket.destroyed)socket.write(JSON.stringify({unreadCount:count})+'\n');}).catch(()=>{});});
  window.webContents.on('before-mouse-event',(_event,input)=>{if(input.type==='mouseDown')setImmediate(()=>{if(electronVisible&&socket.readyState==='open')socket.write(JSON.stringify({focusRequested:true})+'\n');});});
- window.show=()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');};window.showInactive=window.show;
+ // Signal activates its renderer from the show event, even if the host mapped it earlier.
+ window.show=()=>window.emit('show');window.showInactive=window.show;
  window.on('show',()=>{if(socket.readyState==='open')socket.write(JSON.stringify({shown:true})+'\n');});
  socket.on('error',()=>app.quit());socket.on('close',()=>app.quit());
  readline.createInterface({input:socket}).on('line',line=>{try{const m=JSON.parse(line);if(m.shutdown){app.quit();return;}if(m.refreshZoom){applyZoom().catch(()=>{});return;}if(m.preferences){window.webContents.send('chatbridge:preferences',m.preferences);return;}if(m.focus){if(electronVisible)window.webContents.focus();return;}if(typeof m.visibility==='boolean'){if(m.visibility!==electronVisible){electronVisible=m.visibility;if(m.visibility){originalShow();window.webContents.focus();}else{originalHide();socket.write(JSON.stringify({hidden:true})+'\n');}}return;}const p=waiting.get(m.id);if(p){waiting.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}catch{}});
