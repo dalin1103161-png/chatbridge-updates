@@ -232,6 +232,10 @@ function installWorkspace(window, rootDir, suppliedElectron, native) {
     if(method==='home'){browserManager?.hide();activeId=null;for(const view of views.values())view.setVisible(false);native?.hide();window.webContents.send('chatbridge:home');return true;}
     if(method==='workspace-modal'){if(native)native.suspend(value===true);return true;}
     if (method.startsWith('update-')) {
+      if (!updater && process.platform==='linux') {
+        if(method==='update-install')throw Error('Linux 版请下载新版 .deb 安装包进行更新。');
+        return {status:'manual',available:false,message:'Linux 版请使用新版 .deb 安装包覆盖更新。'};
+      }
       if (!updater) throw new Error('更新模块未初始化。');
       if (method === 'update-state') return updater.state();
       if (method === 'update-check') return updater.check();

@@ -87,11 +87,28 @@ function createNativeWorkspace(signalWindow,rootDir,electron){
   });
  }
  async function ensureSignal(id){
-  if(id==='default'||windows.has(id)||children.has(id))return;await listening;
-  if(children.has(id))return;
-  const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token};delete env.ELECTRON_RUN_AS_NODE;
-  const child=spawn(app.getPath('exe'),app.isPackaged?[]:[rootDir],{env,stdio:'ignore',windowsHide:true});children.set(id,child);child.on('error',e=>{children.delete(id);error(e.message);});child.on('exit',()=>{children.delete(id);windows.delete(id);});layout();
+  if(id==='default')return;
+  await listening;
+  if(!windows.has(id)&&!children.has(id)){
+   const env={...process.env,CHATBRIDGE_SIGNAL_PROFILE:id,CHATBRIDGE_HOST_PIPE:pipe,CHATBRIDGE_HOST_TOKEN:token,ELECTRON_OZONE_PLATFORM_HINT:'x11'};
+   delete env.ELECTRON_RUN_AS_NODE;
+   delete env.WAYLAND_DISPLAY;
+   const args=[...(app.isPackaged?[]:[rootDir]),'--ozone-platform=x11','--disable-gpu','--disable-dev-shm-usage'];
+   if(app.commandLine.hasSwitch('no-sandbox'))args.push('--no-sandbox');
+   if(app.commandLine.hasSwitch('remote-debugging-port'))args.push('--remote-debugging-port=0','--remote-debugging-address=127.0.0.1');
+   const child=spawn(app.getPath('exe'),args,{env,stdio:'ignore',windowsHide:true});
+   children.set(id,child);
+   child.on('error',e=>{children.delete(id);error(e.message);});
+   child.on('exit',()=>{children.delete(id);windows.delete(id);});
+  }
+  const deadline=Date.now()+30000;
+  while(!windows.get(id)?.attached){
+   if(!children.has(id))throw Error('Signal 账号进程已退出，请重新点击账号。');
+   if(Date.now()>deadline)throw Error('Signal 账号窗口连接超时，请重新点击账号。');
+   await new Promise(resolve=>setTimeout(resolve,100));
+  }
  }
+
  const controller={host,shutdown,inputDiagnostics:()=>({version:app.getVersion(),electron:process.versions.electron,windows:require('node:os').release(),signalActive:active!==null,suspended,keyEvents,lastKeyAt,lastModifiers,trace:focusTrace.slice()}),focusHost:()=>focusNative(hwnd(host),process.pid),setSidebarWidth(value){if(!Number.isInteger(value)||value<88||value>320)throw Error('Invalid sidebar width');sidebarWidth=value;layout();},snapshot:()=>({parent:hwnd(host),active,sidebarWidth,windows:[...windows.values()].map(r=>({...r}))}),defaultWebContents:signalWindow.webContents,setRPC:f=>rpc=f,
   start:ensureSignal,
   refreshZoom(id){const client=[...clients].find(c=>c.chatbridgeProfile===id);if(client&&!client.destroyed)client.write(JSON.stringify({refreshZoom:true})+'\n');},

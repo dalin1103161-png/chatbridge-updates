@@ -86,6 +86,7 @@ def prepare(destination, existing=False):
     package['build']['nsis']['allowToChangeInstallationDirectory'] = True
     package['build']['win']['signAndEditExecutable'] = False
     package['build']['linux'].update({'target': ['deb'], 'category': 'Network', 'artifactName': 'ChatBridge-Linux-amd64.${ext}', 'executableName': 'chatbridge', 'maintainer': 'ChatBridge', 'synopsis': 'ChatBridge messaging workspace', 'publish': None})
+    package['build']['linux'].setdefault('desktop', {}).setdefault('entry', {})['Exec'] = 'env -u WAYLAND_DISPLAY /opt/ChatBridge/chatbridge --ozone-platform=x11 --disable-gpu --disable-dev-shm-usage %U'
     package['build']['deb'] = {'depends': ['libgtk-3-0', 'libnss3', 'libasound2t64', 'libxss1', 'libxtst6', 'libgbm1', 'libx11-6', 'python3', 'libsecret-1-0', 'libpulse0', 'libnotify4', 'libx11-xcb1', 'libc6 (>= 2.34)']}
     package['build']['forceCodeSigning'] = False
     package_file.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

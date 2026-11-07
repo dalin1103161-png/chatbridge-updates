@@ -6,8 +6,8 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
 (async()=>{
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
  const output=path.resolve('startup-diagnostics',process.env.CHATBRIDGE_STARTUP_LABEL||'run');fs.mkdirSync(output,{recursive:true});
- const env={...process.env};delete env.CHATBRIDGE_HOST_PIPE;delete env.CHATBRIDGE_HOST_TOKEN;delete env.CHATBRIDGE_SIGNAL_PROFILE;
- const app=spawn(path.resolve('signal-source/release/linux-unpacked/chatbridge'),['--no-sandbox','--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port],{env,stdio:['ignore','pipe','pipe']});
+ const env={...process.env,WAYLAND_DISPLAY:'wayland-test',XDG_SESSION_TYPE:'wayland'};delete env.CHATBRIDGE_HOST_PIPE;delete env.CHATBRIDGE_HOST_TOKEN;delete env.CHATBRIDGE_SIGNAL_PROFILE;
+ const app=spawn(path.resolve('signal-source/release/linux-unpacked/chatbridge'),['--no-sandbox','--ozone-platform=x11','--disable-gpu','--disable-dev-shm-usage','--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port],{env,stdio:['ignore','pipe','pipe']});
  const outputLog=fs.createWriteStream(path.join(output,'process.log'));app.stdout.pipe(outputLog,{end:false});app.stderr.pipe(outputLog,{end:false});
  let client,homeClient,homeVerified=false;
  try{
@@ -70,6 +70,30 @@ async function cdp(url){const ws=new WebSocket(url);await new Promise((r,j)=>{ws
    await hostEval(`document.querySelector('[data-chatbridge-settings]').lastElementChild.click()`);
    await hostEval(`document.querySelector('[data-cb-account="signal:default"] > button').click()`);
    const shownDeadline=Date.now()+10000;while(await evaluate(`document.visibilityState`)!=='visible'){if(Date.now()>shownDeadline)throw Error('Signal did not become visible after closing settings');await delay(100);}
+  }
+  if(loaded&&homeClient){
+   const evalHost=async expression=>(await homeClient.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result.value;
+   const waitFor=async(check,message)=>{const deadline=Date.now()+90000;while(Date.now()<deadline){const value=await check();if(value)return value;await delay(200);}throw Error(message);};
+   await evalHost(`document.querySelector('#cb-home-signal').click()`);
+   await waitFor(()=>evalHost(`!!document.querySelector('[data-cb-dialog] input')`),'Signal account form missing');
+   await evalHost(`document.querySelector('[data-cb-dialog] input').value='Linux second account';[...document.querySelectorAll('[data-cb-dialog] button')].find(b=>/添加并扫码|Add/.test(b.textContent)).click()`);
+   const id=await waitFor(()=>evalHost(`[...document.querySelectorAll('[data-cb-account]')].find(n=>n.textContent.includes('Linux second account'))?.dataset.cbAccount?.split(':')[1]`),'Second Signal account was not added');
+   const profile=path.join(process.env.XDG_CONFIG_HOME||path.join(require('node:os').homedir(),'.config'),'ChatBridgeSignalProfiles',id);
+   const debug=await waitFor(async()=>{try{return fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];}catch{return null;}},'Second Signal debug endpoint missing');
+   const pages=await(await fetch('http://127.0.0.1:'+debug+'/json/list')).json();
+   const page=pages.find(p=>p.type==='page'&&p.url.includes('background.html'));
+   if(!page)throw Error('Second Signal renderer missing');
+   const second=await cdp(page.webSocketDebuggerUrl);
+   try{
+    const read=async()=>{const value=await second.call('Runtime.evaluate',{expression:`({visible:document.visibilityState,text:document.querySelector('#app-container')?.innerText||''})`,returnByValue:true});return value.result.value;};
+    await waitFor(async()=>{const r=await read();return r?.visible==='visible'&&/link|关联|扫描|device|QR|phone/i.test(r.text);},'Second Signal QR page did not become visible');
+    const shot=await second.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-second-login.png'),Buffer.from(shot.data,'base64'));
+    await evalHost(`document.querySelector('[data-cb-account="signal:default"] > button').click()`);
+    await waitFor(async()=>{const r=await client.call('Runtime.evaluate',{expression:'document.visibilityState',returnByValue:true});return r.result.value==='visible';},'Default account did not reappear');
+    await evalHost(`document.querySelector('[data-cb-account="signal:${id}"] > button').click()`);
+    await waitFor(async()=>(await read()).visible==='visible','Second account did not reappear after switching');
+    console.log('PACKAGED_SECOND_SIGNAL_QR_AND_SWITCH_PASS');
+   }finally{second.close();}
   }
   if(client){const shot=await client.call('Page.captureScreenshot');fs.writeFileSync(path.join(output,'signal-login.png'),Buffer.from(shot.data,'base64'));}
   if(!homeVerified)throw Error('Packaged homepage did not become ready');
